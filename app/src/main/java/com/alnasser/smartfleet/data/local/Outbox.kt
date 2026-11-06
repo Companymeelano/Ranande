@@ -37,6 +37,9 @@ abstract class OutboxDao {
     @Query("SELECT * FROM outbox WHERE tenantId = :tenantId AND userId = :userId ORDER BY createdAtMillis, id")
     abstract fun observeForAccount(tenantId: String, userId: String): Flow<List<OutboxCommand>>
 
+    @Query("SELECT EXISTS(SELECT 1 FROM outbox WHERE tenantId = :tenantId AND userId = :userId AND state IN ('PENDING', 'IN_FLIGHT'))")
+    abstract suspend fun hasUnsent(tenantId: String, userId: String): Boolean
+
     @Query("""
         SELECT * FROM outbox WHERE tenantId = :tenantId AND userId = :userId
         AND (state = 'PENDING' OR (state = 'IN_FLIGHT' AND leaseUntilMillis <= :nowMillis))

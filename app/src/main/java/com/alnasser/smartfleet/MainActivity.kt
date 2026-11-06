@@ -35,8 +35,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.google.firebase.FirebaseApp
-import com.google.firebase.FirebaseOptions
 import kotlinx.coroutines.delay
 
 private val colors = darkColorScheme(
@@ -47,20 +45,7 @@ private val colors = darkColorScheme(
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val prefs = getSharedPreferences("firebase-public-config", MODE_PRIVATE)
-        fun configure(project: String, appId: String, apiKey: String): Boolean = try {
-            if (FirebaseApp.getApps(this).isEmpty()) {
-                FirebaseApp.initializeApp(this, FirebaseOptions.Builder().setProjectId(project).setApplicationId(appId).setApiKey(apiKey).build())
-            }
-            true
-        } catch (_: IllegalArgumentException) { false } catch (_: IllegalStateException) { false }
-        var configured = FirebaseApp.getApps(this).isNotEmpty()
-        if (!configured) {
-            val project = prefs.getString("project", null)
-            val appId = prefs.getString("appId", null)
-            val apiKey = prefs.getString("apiKey", null)
-            if (project != null && appId != null && apiKey != null) configured = configure(project, appId, apiKey)
-        }
+        val configured = FirebaseSetup.restore(this)
         setContent {
             var ready by remember { mutableStateOf(configured) }
             var screen by remember { mutableStateOf("intro") }
@@ -75,8 +60,7 @@ class MainActivity : ComponentActivity() {
                             else -> Column(Modifier.fillMaxSize()) {
                                 TextButton(onClick = { screen = "preview" }) { Text("بازگشت به معرفی") }
                                 if (ready) LoginScreen(viewModel()) else SetupScreen { project, appId, apiKey ->
-                                    if (configure(project, appId, apiKey)) {
-                                        prefs.edit().putString("project", project).putString("appId", appId).putString("apiKey", apiKey).apply()
+                                    if (FirebaseSetup.configure(this@MainActivity, project, appId, apiKey)) {
                                         ready = true
                                         true
                                     } else false

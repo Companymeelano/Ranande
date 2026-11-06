@@ -1,9 +1,11 @@
 package com.alnasser.smartfleet
 
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import com.alnasser.smartfleet.data.sync.OutboxScheduler
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -20,7 +22,7 @@ sealed interface LoginState {
 }
 
 /** UI role display is not an authorization boundary; Firestore rules and server enforce access. */
-class LoginViewModel : ViewModel() {
+class LoginViewModel(application: Application) : AndroidViewModel(application) {
     var state: LoginState by mutableStateOf(LoginState.Idle)
         private set
     private val auth = FirebaseAuth.getInstance()
@@ -58,6 +60,9 @@ class LoginViewModel : ViewModel() {
                                 else -> null
                             }
                             if (snapshot.exists() && snapshot.getBoolean("active") == true && role != null) {
+                                if (state !is LoginState.SignedIn) {
+                                    OutboxScheduler.schedule(getApplication(), tenantId, user.uid)
+                                }
                                 state = LoginState.SignedIn(tenantId, role, snapshot.getString("role")!!)
                             } else {
                                 signOutWithError("حساب فعال یا نقش معتبر یافت نشد.")
