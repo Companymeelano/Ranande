@@ -62,3 +62,17 @@ test('client reads and writes are denied even with authentication', async () => 
   const anonymous = env.unauthenticatedContext().firestore();
   await assertFails(getDoc(doc(anonymous, 'tenants/fleet')));
 });
+
+test('active users can read only their own profile in an active tenant', async () => {
+  const driver = env.authenticatedContext('driver').firestore();
+  const own = doc(driver, 'tenants/fleet/users/driver');
+  assert.equal((await getDoc(own)).data().role, 'driver');
+  await assertFails(setDoc(own, { active: true, role: 'manager' }));
+  await assertFails(getDoc(doc(env.authenticatedContext('other').firestore(), 'tenants/fleet/users/driver')));
+  await assertFails(getDoc(doc(env.unauthenticatedContext().firestore(), 'tenants/fleet/users/driver')));
+  await db.doc('tenants/fleet/users/driver').update({ active: false });
+  await assertFails(getDoc(own));
+  await db.doc('tenants/fleet/users/driver').update({ active: true });
+  await db.doc('tenants/fleet').update({ active: false });
+  await assertFails(getDoc(own));
+});

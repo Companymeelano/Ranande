@@ -1,7 +1,15 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Fail closed until role- and assignment-scoped rules are implemented and tested.
+    // A user may read only their own active profile in an active tenant.
+    // Role and membership are provisioned exclusively by trusted administration.
+    match /tenants/{tenantId}/users/{userId} {
+      allow get: if request.auth != null
+        && request.auth.uid == userId
+        && resource.data.active == true
+        && get(/databases/$(database)/documents/tenants/$(tenantId)).data.active == true;
+      allow list, write: if false;
+    }
     match /{document=**} { allow read, write: if false; }
   }
 }
