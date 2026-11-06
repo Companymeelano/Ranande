@@ -2,7 +2,7 @@ package com.alnasser.smartfleet
 
 import android.content.Context
 import android.icu.util.Calendar
-import android.icu.util.PersianCalendar
+import android.icu.util.ULocale
 import android.icu.util.TimeZone
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -114,7 +114,7 @@ fun asciiNumber(value: String): String = value.trim().map { c -> when (c) {
     in '۰'..'۹' -> '0' + (c - '۰'); in '٠'..'٩' -> '0' + (c - '٠'); else -> c
 } }.joinToString("")
 fun monthKey(millis: Long): String {
-    val calendar = PersianCalendar(TimeZone.getTimeZone("Asia/Tehran"))
+    val calendar = Calendar.getInstance(TimeZone.getTimeZone("Asia/Tehran"), ULocale("fa_IR@calendar=persian"))
     calendar.timeInMillis = millis
     return "%04d%02d".format(java.util.Locale.US, calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH) + 1)
 }
