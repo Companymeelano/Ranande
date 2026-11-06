@@ -207,3 +207,43 @@ test('fuel and assignment reads are scoped by role and ownership; direct writes 
   await db.doc('tenants/fleet/users/driver').update({ active: false });
   await assertFails(getDocs(query(assignments, where('driverUid', '==', 'driver'), where('active', '==', true))));
 });
+
+test('authenticated callable submission, quote and confirmation run end to end', async () => {
+  const { initializeApp: makeApp, deleteApp: deleteClient } = require('firebase/app');
+  const { getAuth, connectAuthEmulator, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } = require('firebase/auth');
+  const { getFunctions, connectFunctionsEmulator, httpsCallable } = require('firebase/functions');
+  const app = makeApp({ apiKey: 'emulator-only', projectId }, 'callable-integration');
+  try {
+    const auth = getAuth(app);
+    connectAuthEmulator(auth, `http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}`, { disableWarnings: true });
+    const functions = getFunctions(app, 'us-central1');
+    connectFunctionsEmulator(functions, '127.0.0.1', 5001);
+    const driver = await createUserWithEmailAndPassword(auth, 'driver-callable@example.test', 'test-password-123');
+    const driverUid = driver.user.uid;
+    await signOut(auth);
+    const accountant = await createUserWithEmailAndPassword(auth, 'accountant-callable@example.test', 'test-password-123');
+    const accountantUid = accountant.user.uid;
+    await db.doc(`tenants/fleet/users/${driverUid}`).set({ active: true, role: 'driver' });
+    await db.doc(`tenants/fleet/users/${accountantUid}`).set({ active: true, role: 'accountant' });
+    await db.doc('tenants/fleet/assignments/a-callable').set({ active: true, driverUid, vehicleId: 'v1' });
+    await db.doc('tenants/fleet/settings/fuel').set({ version: 1, monthlyQuotaMl: 70000, governmentPriceTomanPerLiter: 300, freePriceTomanPerLiter: 80000 });
+    await signOut(auth);
+    await signInWithEmailAndPassword(auth, 'driver-callable@example.test', 'test-password-123');
+    const submitCallable = httpsCallable(functions, 'submitFuelRequest');
+    const payload = { ...input, assignmentId: 'a-callable' };
+    assert.equal((await submitCallable(payload)).data.status, 'pending');
+    assert.equal((await submitCallable(payload)).data.status, 'pending');
+    await assert.rejects(httpsCallable(functions, 'quoteFuelRequest')({ tenantId: 'fleet', requestId }), e => e.code === 'functions/permission-denied');
+    await signOut(auth);
+    await signInWithEmailAndPassword(auth, 'accountant-callable@example.test', 'test-password-123');
+    const preview = (await httpsCallable(functions, 'quoteFuelRequest')({ tenantId: 'fleet', requestId })).data;
+    assert.equal(preview.quote.governmentMl, 70000);
+    assert.equal(preview.quote.totalAmount, 2421000);
+    const final = (await httpsCallable(functions, 'approveFuelRequest')({ tenantId: 'fleet', requestId, quote: preview.quote })).data;
+    assert.equal(final.status, 'approved');
+    assert.equal((await db.doc(`tenants/fleet/fuelRequests/${requestId}`).get()).data().status, 'approved');
+    assert.equal((await db.collection('tenants/fleet/fuelTransactions').get()).size, 1);
+  } finally {
+    await deleteClient(app);
+  }
+});

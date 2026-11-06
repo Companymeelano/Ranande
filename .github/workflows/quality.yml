@@ -21,7 +21,7 @@ jobs:
           java-version: '17'
       - run: npm ci --prefix firebase/functions
       - run: npm test --prefix firebase/functions
-      - run: ./firebase/functions/node_modules/.bin/firebase emulators:exec --project demo-alnasser --only firestore,auth "npm run test:integration --prefix firebase/functions"
+      - run: ./firebase/functions/node_modules/.bin/firebase emulators:exec --project demo-alnasser --only firestore,auth,functions "npm run test:integration --prefix firebase/functions"
   android-build:
     runs-on: ubuntu-latest
     steps:
