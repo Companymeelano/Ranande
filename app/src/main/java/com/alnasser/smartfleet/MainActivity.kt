@@ -2,6 +2,7 @@ package com.alnasser.smartfleet
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -17,10 +18,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
+import kotlinx.coroutines.delay
 
 private val colors = darkColorScheme(
     primary = Color(0xFFE0C078), background = Color(0xFF101B2B),
@@ -59,15 +63,25 @@ class MainActivity : ComponentActivity() {
         }
         setContent {
             var ready by remember { mutableStateOf(configured) }
+            var screen by remember { mutableStateOf("intro") }
+            LaunchedEffect(Unit) { delay(2400); if (screen == "intro") screen = "preview" }
+            BackHandler(enabled = screen == "connected") { screen = "preview" }
             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
                 MaterialTheme(colorScheme = colors) {
                     Surface(modifier = Modifier.fillMaxSize()) {
-                        if (ready) LoginScreen(viewModel()) else SetupScreen { project, appId, apiKey ->
-                            if (configure(project, appId, apiKey)) {
-                                prefs.edit().putString("project", project).putString("appId", appId).putString("apiKey", apiKey).apply()
-                                ready = true
-                                true
-                            } else false
+                        when (screen) {
+                            "intro" -> BrandIntro(onContinue = { screen = "preview" })
+                            "preview" -> FleetPreview(onConnect = { screen = "connected" })
+                            else -> Column(Modifier.fillMaxSize()) {
+                                TextButton(onClick = { screen = "preview" }) { Text("بازگشت به معرفی") }
+                                if (ready) LoginScreen(viewModel()) else SetupScreen { project, appId, apiKey ->
+                                    if (configure(project, appId, apiKey)) {
+                                        prefs.edit().putString("project", project).putString("appId", appId).putString("apiKey", apiKey).apply()
+                                        ready = true
+                                        true
+                                    } else false
+                                }
+                            }
                         }
                     }
                 }
