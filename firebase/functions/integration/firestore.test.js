@@ -76,3 +76,27 @@ test('active users can read only their own profile in an active tenant', async (
   await db.doc('tenants/fleet').update({ active: false });
   await assertFails(getDoc(own));
 });
+
+test('email account created by Auth emulator can read only its provisioned profile', async () => {
+  if (!process.env.FIREBASE_AUTH_EMULATOR_HOST) throw new Error('Auth emulator required');
+  const { initializeApp: createClientApp, deleteApp: deleteClientApp } = require('firebase/app');
+  const { getAuth, connectAuthEmulator, createUserWithEmailAndPassword, signOut, signInWithEmailAndPassword } = require('firebase/auth');
+  const { getFirestore: clientFirestore, connectFirestoreEmulator } = require('firebase/firestore');
+  const clientApp = createClientApp({ apiKey: 'emulator-only', projectId }, 'auth-integration');
+  try {
+    const clientAuth = getAuth(clientApp);
+    connectAuthEmulator(clientAuth, `http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}`, { disableWarnings: true });
+    const clientDb = clientFirestore(clientApp);
+    const [host, port] = process.env.FIRESTORE_EMULATOR_HOST.split(':');
+    connectFirestoreEmulator(clientDb, host, Number(port));
+    const created = await createUserWithEmailAndPassword(clientAuth, 'driver@example.test', 'test-password-123');
+    await db.doc(`tenants/fleet/users/${created.user.uid}`).set({ active: true, role: 'driver' });
+    await signOut(clientAuth);
+    const signedIn = await signInWithEmailAndPassword(clientAuth, 'driver@example.test', 'test-password-123');
+    const profile = await getDoc(doc(clientDb, 'tenants/fleet/users', signedIn.user.uid));
+    assert.equal(profile.data().role, 'driver');
+    await assertFails(getDoc(doc(clientDb, 'tenants/fleet/users/driver')));
+  } finally {
+    await deleteClientApp(clientApp);
+  }
+});
