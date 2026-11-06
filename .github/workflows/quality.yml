@@ -48,13 +48,20 @@ jobs:
           set -o pipefail
           "$SDKMANAGER" 'platforms;android-35' 'build-tools;35.0.0' 
       - uses: gradle/actions/setup-gradle@v4
-      - run: ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest
+      - name: Build debug and test APKs
+        run: |
+          set -o pipefail
+          ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --console=plain 2>&1 | tee "$RUNNER_TEMP/gradle.log" || {
+            tail -50 "$RUNNER_TEMP/gradle.log" | while IFS= read -r line; do echo "::error::$line"; done
+            exit 1
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: android-debug-infrastructure-only
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
   android-instrumentation:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
