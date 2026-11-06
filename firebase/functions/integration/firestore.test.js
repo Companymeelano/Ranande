@@ -24,9 +24,9 @@ beforeEach(async () => {
   await env.clearFirestore();
   const batch = db.batch();
   for (const [path, data] of Object.entries({
-    'tenants/fleet': { active: true },
+    'tenants/fleet': { active: true, vehiclePlateIndexReady: true },
     'tenants/fleet/users/driver': { active: true, role: 'driver' },
-    'tenants/fleet/vehicles/v1': { active: true },
+    'tenants/fleet/vehicles/v1': { active: true, tankCapacityMl: 300000 },
     'tenants/fleet/assignments/a1': { active: true, driverUid: 'driver', vehicleId: 'v1' },
   })) batch.set(db.doc(path), data);
   await batch.commit();
@@ -101,24 +101,22 @@ test('email account created by Auth emulator can read only its provisioned profi
   }
 });
 
-test('only active managers can read and create validated vehicles', async () => {
-  const { serverTimestamp, collection, getDocs, deleteDoc, updateDoc } = require('firebase/firestore');
+test('vehicle reads require manager and direct writes are denied', async () => {
+  const { collection, getDocs, deleteDoc, updateDoc } = require('firebase/firestore');
   await db.doc('tenants/fleet/users/manager').set({ active: true, role: 'manager' });
   await db.doc('tenants/fleet/users/accountant').set({ active: true, role: 'accountant' });
   const manager = env.authenticatedContext('manager').firestore();
   const driver = env.authenticatedContext('driver').firestore();
   const accountant = env.authenticatedContext('accountant').firestore();
-  const vehicle = { plate: 'Test-01', model: 'Isuzu', tankCapacityMl: 300000, active: true, createdBy: 'manager', createdAt: serverTimestamp() };
+  const vehicle = { plate: 'Test-01', model: 'Isuzu', tankCapacityMl: 300000, active: true };
   const path = 'tenants/fleet/vehicles/test';
-  await setDoc(doc(manager, path), vehicle);
-  assert.equal((await getDocs(collection(manager, 'tenants/fleet/vehicles'))).size, 2);
-  await assertFails(setDoc(doc(driver, 'tenants/fleet/vehicles/driver-test'), vehicle));
+  assert.equal((await getDocs(collection(manager, 'tenants/fleet/vehicles'))).size, 1);
+  await assertFails(setDoc(doc(manager, path), vehicle));
+  await assertFails(setDoc(doc(driver, path), vehicle));
   await assertFails(getDocs(collection(driver, 'tenants/fleet/vehicles')));
   await assertFails(getDocs(collection(accountant, 'tenants/fleet/vehicles')));
-  await assertFails(setDoc(doc(manager, 'tenants/fleet/vehicles/invalid'), { ...vehicle, tankCapacityMl: -1 }));
-  await assertFails(setDoc(doc(manager, 'tenants/fleet/vehicles/forged'), { ...vehicle, createdBy: 'driver' }));
-  await assertFails(updateDoc(doc(manager, path), { plate: 'changed' }));
-  await assertFails(deleteDoc(doc(manager, path)));
+  await assertFails(updateDoc(doc(manager, 'tenants/fleet/vehicles/v1'), { active: false }));
+  await assertFails(deleteDoc(doc(manager, 'tenants/fleet/vehicles/v1')));
   await db.doc('tenants/fleet/users/manager').update({ active: false });
   await assertFails(getDocs(collection(manager, 'tenants/fleet/vehicles')));
 });
@@ -323,4 +321,51 @@ test('manager can assign and revoke via callable functions but a driver cannot',
     await signInWithEmailAndPassword(auth, 'assignment-manager@example.test', 'test-password-123');
     assert.equal((await httpsCallable(functions, 'revokeDriverAssignment')({ tenantId: 'fleet', assignmentId: assignment.assignmentId })).data.active, false);
   } finally { await deleteClient(app); }
+});
+
+test('vehicle creation is idempotent and concurrent equivalent plates cannot duplicate', async () => {
+  const { createVehicle } = require('../vehicles');
+  await db.doc('tenants/fleet/users/manager').set({ active: true, role: 'manager' });
+  await db.doc('tenants/fleet/users/accountant').set({ active: true, role: 'accountant' });
+  const deps = { db, serverTimestamp: () => FieldValue.serverTimestamp() };
+  const a = { tenantId: 'fleet', vehicleId: '723e4567-e89b-42d3-a456-426614174000', plate: '۱۲ ب ۳۴۵', model: 'Isuzu', tankCapacityMl: 300000 };
+  const b = { ...a, vehicleId: '823e4567-e89b-42d3-a456-426614174000', plate: '12-ب-345' };
+  await assert.rejects(createVehicle(deps, 'accountant', a), { code: 'permission-denied' });
+  const results = await Promise.allSettled([createVehicle(deps, 'manager', a), createVehicle(deps, 'manager', b)]);
+  assert.equal(results.filter(r => r.status === 'fulfilled').length, 1);
+  assert.equal(results.find(r => r.status === 'rejected').reason.code, 'already-exists');
+  const winner = results.find(r => r.status === 'fulfilled').value.vehicleId === a.vehicleId ? a : b;
+  assert.equal((await createVehicle(deps, 'manager', winner)).vehicleId, winner.vehicleId);
+  assert.equal((await db.collection('tenants/fleet/vehiclePlateLocks').get()).size, 1);
+  assert.equal((await db.collection('tenants/fleet/audit').get()).size, 1);
+  await assert.rejects(createVehicle(deps, 'manager', { ...winner, model: 'changed' }), { code: 'already-exists' });
+});
+
+test('fuel capacity and replay policy are enforced by the central service', async () => {
+  const command = { ...input, litersMl: 300001 };
+  await assert.rejects(submit(command), { code: 'failed-precondition' });
+  assert.equal((await db.doc(`tenants/fleet/fuelRequests/${requestId}`).get()).exists, false);
+  await submit(input);
+  await db.doc('tenants/fleet/assignments/a1').update({ active: false });
+  assert.equal((await submit(input)).status, 'pending');
+  await assert.rejects(submit({ ...input, requestId: '923e4567-e89b-42d3-a456-426614174000' }), { code: 'permission-denied' });
+});
+
+test('legacy plate index migration fails closed on duplicates and unlocks clean tenants', async () => {
+  const { migratePlateIndex } = require('../scripts/migrate-vehicle-plates.cjs');
+  const { createVehicle } = require('../vehicles');
+  const deps = { db, serverTimestamp: () => FieldValue.serverTimestamp() };
+  await db.doc('tenants/legacy').set({ active: true });
+  await db.doc('tenants/legacy/users/manager').set({ active: true, role: 'manager' });
+  await db.doc('tenants/legacy/vehicles/old1').set({ plate: '۱۲ ب ۳۴۵' });
+  await db.doc('tenants/legacy/vehicles/old2').set({ plate: '12-ب-345' });
+  const newVehicle = { tenantId: 'legacy', vehicleId: 'a23e4567-e89b-42d3-a456-426614174000', plate: 'new-1', model: 'Isuzu', tankCapacityMl: 300000 };
+  await assert.rejects(createVehicle(deps, 'manager', newVehicle), { code: 'failed-precondition' });
+  await assert.rejects(migratePlateIndex(deps, 'legacy'), /Duplicate/);
+  assert.equal((await db.collection('tenants/legacy/vehiclePlateLocks').get()).size, 0);
+  await db.doc('tenants/legacy/vehicles/old2').delete();
+  assert.equal((await migratePlateIndex(deps, 'legacy')).count, 1);
+  assert.equal((await migratePlateIndex(deps, 'legacy')).status, 'already-ready');
+  await assert.rejects(createVehicle(deps, 'manager', { ...newVehicle, plate: '12-ب-345' }), { code: 'already-exists' });
+  assert.equal((await createVehicle(deps, 'manager', newVehicle)).status, 'created');
 });

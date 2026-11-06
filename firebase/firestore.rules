@@ -19,14 +19,8 @@ service cloud.firestore {
     }
     match /tenants/{tenantId}/vehicles/{vehicleId} {
       allow read: if manager(tenantId);
-      allow create: if manager(tenantId)
-        && request.resource.data.keys().hasOnly(['plate', 'model', 'tankCapacityMl', 'active', 'createdAt', 'createdBy'])
-        && request.resource.data.keys().hasAll(['plate', 'model', 'tankCapacityMl', 'active', 'createdAt', 'createdBy'])
-        && request.resource.data.plate is string && request.resource.data.plate.size() > 0 && request.resource.data.plate.size() <= 40
-        && request.resource.data.model is string && request.resource.data.model.size() > 0 && request.resource.data.model.size() <= 100
-        && request.resource.data.tankCapacityMl is int && request.resource.data.tankCapacityMl > 0 && request.resource.data.tankCapacityMl <= 10000000
-        && request.resource.data.active == true && request.resource.data.createdBy == request.auth.uid
-        && request.resource.data.createdAt == request.time;
+      // Vehicle creation and audit are atomic in the trusted callable.
+      allow create: if false;
       allow update, delete: if false;
     }
     // A user may read only their own active profile in an active tenant.

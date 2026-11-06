@@ -40,7 +40,7 @@ private fun statusLabel(status: String): String = when (status) {
 
 @Composable
 fun FuelScreen(model: FuelViewModel, role: String) {
-    Text("درخواست‌های سوخت", style = MaterialTheme.typography.titleLarge)
+    OperationalHeader(R.drawable.icon_fuel, "درخواست‌های سوخت")
     Text("این بخش آزمایشی است؛ تا تکمیل آزمون عملیاتی برای ثبت مالی واقعی استفاده نشود.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
     if (role == "driver") DriverFuel(model) else ReviewerFuel(model)
     model.message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
@@ -91,6 +91,8 @@ private fun ReviewerFuel(model: FuelViewModel) {
                     Text("آزاد: ${liters((q["freeMl"] as Number).toLong())} لیتر")
                     Text("نرخ دولتی: ${number(q["governmentRate"] as Number)} تومان / لیتر")
                     Text("نرخ آزاد: ${number(q["freeRate"] as Number)} تومان / لیتر")
+                    Text("مبلغ دولتی: ${number(q["governmentAmount"] as Number)} تومان")
+                    Text("مبلغ آزاد: ${number(q["freeAmount"] as Number)} تومان")
                     Text("جمع کل: ${number(q["totalAmount"] as Number)} تومان", style = MaterialTheme.typography.titleMedium)
                     model.message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                     Text("این مقادیر هنگام تأیید مجدداً روی سرور بررسی می‌شوند.", style = MaterialTheme.typography.bodySmall)

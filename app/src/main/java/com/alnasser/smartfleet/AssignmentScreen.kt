@@ -27,7 +27,7 @@ fun AssignmentScreen(model: AssignmentViewModel, vehicles: List<FleetVehicle>) {
     var chosen by remember { mutableStateOf<String?>(null) }
     var driver by remember { mutableStateOf("") }
     var revoke by remember { mutableStateOf<DriverAssignment?>(null) }
-    Text("تخصیص راننده", style = MaterialTheme.typography.titleLarge)
+    OperationalHeader(R.drawable.icon_customer, "تخصیص راننده")
     Text("شناسه راننده باید متعلق به یک کاربر فعال با نقش راننده باشد.", style = MaterialTheme.typography.bodySmall)
     if (vehicles.isEmpty()) Text("ابتدا خودرو را ثبت کنید.")
     vehicles.forEach { v -> Row(verticalAlignment = Alignment.CenterVertically) {

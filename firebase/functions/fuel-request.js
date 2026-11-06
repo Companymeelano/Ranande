@@ -40,11 +40,11 @@ async function submitFuelRequest({ db, serverTimestamp }, uid, data) {
       await Promise.all([tenant, user, vehicle, assignment, request].map(ref => tx.get(ref)));
     const membership = userSnap.data();
     const assigned = assignmentSnap.data();
+    // An active driver can retrieve the result of their own already-accepted command even
+    // after reassignment, so a lost response cannot turn a successful submission into FAILED.
     if (!tenantSnap.exists || tenantSnap.data().active !== true || !userSnap.exists ||
-        membership.active !== true || membership.role !== 'driver' ||
-        !vehicleSnap.exists || vehicleSnap.data().active !== true || !assignmentSnap.exists ||
-        assigned.active !== true || assigned.driverUid !== uid || assigned.vehicleId !== data.vehicleId) {
-      throw new CommandError('permission-denied', 'Not authorized for this vehicle.');
+        membership.active !== true || membership.role !== 'driver') {
+      throw new CommandError('permission-denied', 'Not authorized for this tenant.');
     }
     if (existingSnap.exists) {
       const old = existingSnap.data();
@@ -53,6 +53,14 @@ async function submitFuelRequest({ db, serverTimestamp }, uid, data) {
         throw new CommandError('already-exists', 'Request identifier already used.');
       }
       return { requestId: request.id, status: old.status };
+    }
+    if (!vehicleSnap.exists || vehicleSnap.data().active !== true || !assignmentSnap.exists ||
+        assigned.active !== true || assigned.driverUid !== uid || assigned.vehicleId !== data.vehicleId) {
+      throw new CommandError('permission-denied', 'Not authorized for this vehicle.');
+    }
+    const capacity = vehicleSnap.data().tankCapacityMl;
+    if (!Number.isSafeInteger(capacity) || capacity <= 0 || data.litersMl > capacity) {
+      throw new CommandError('failed-precondition', 'Fuel volume exceeds tank capacity or capacity is invalid.');
     }
     tx.create(request, {
       tenantId: data.tenantId, driverUid: uid, vehicleId: data.vehicleId,

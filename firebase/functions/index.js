@@ -51,3 +51,14 @@ function assignmentHandler(revoke) {
 }
 exports.assignDriver = assignmentHandler(false);
 exports.revokeDriverAssignment = assignmentHandler(true);
+
+const { createVehicle } = require('./vehicles');
+exports.createVehicle = onCall(async request => {
+  try {
+    return await createVehicle({ db: getFirestore(), serverTimestamp: () => FieldValue.serverTimestamp() }, request.auth?.uid, request.data);
+  } catch (error) {
+    if (error instanceof CommandError) throw new HttpsError(error.code, error.message);
+    console.error('vehicle creation failed', error);
+    throw new HttpsError('internal', 'Request could not be processed.');
+  }
+});

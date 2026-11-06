@@ -35,6 +35,12 @@ class OutboxSync(
             }
             val outcome = try { send(command) } catch (e: CancellationException) { throw e }
                 catch (_: Exception) { SendOutcome.Retry("transport_error") }
+            // Auth may change while the request is in flight. Keep the command for its owner;
+            // a retry is safe because the server uses the same idempotency key.
+            if (currentUid() != userId) {
+                dao.retry(command.id, tenantId, userId, token, "session_changed")
+                return SyncOutcome.SESSION_CHANGED
+            }
             when (outcome) {
                 SendOutcome.Accepted -> {
                     // A stale worker must never acknowledge a newly leased command.

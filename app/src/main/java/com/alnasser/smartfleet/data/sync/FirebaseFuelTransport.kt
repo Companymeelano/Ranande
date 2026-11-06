@@ -39,7 +39,7 @@ class FirebaseFuelTransport(private val functions: FirebaseFunctions) {
                 FirebaseFunctionsException.Code.CANCELLED, FirebaseFunctionsException.Code.UNKNOWN,
                 FirebaseFunctionsException.Code.DEADLINE_EXCEEDED, FirebaseFunctionsException.Code.RESOURCE_EXHAUSTED,
                 FirebaseFunctionsException.Code.ABORTED, FirebaseFunctionsException.Code.INTERNAL,
-                FirebaseFunctionsException.Code.UNAVAILABLE -> SendOutcome.Retry(e.code.name.lowercase())
+                FirebaseFunctionsException.Code.UNAVAILABLE, FirebaseFunctionsException.Code.UNAUTHENTICATED -> SendOutcome.Retry(e.code.name.lowercase())
                 else -> SendOutcome.Rejected(e.code.name.lowercase())
             }
         }

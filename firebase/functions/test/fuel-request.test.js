@@ -9,7 +9,7 @@ function fakeDb() {
   const documents = new Map(Object.entries({
     'tenants/fleet': { active: true },
     'tenants/fleet/users/u1': { active: true, role: 'driver' },
-    'tenants/fleet/vehicles/v1': { active: true },
+    'tenants/fleet/vehicles/v1': { active: true, tankCapacityMl: 300000 },
     'tenants/fleet/assignments/a1': { active: true, driverUid: 'u1', vehicleId: 'v1' },
   }));
   function doc(path) { return { path, id: path.split('/').at(-1), collection: name => collection(`${path}/${name}`) }; }
@@ -36,10 +36,25 @@ test('same key with changed payload is rejected', async () => {
   const { db } = fakeDb(); await invoke(db);
   await assert.rejects(invoke(db, 'u1', { ...command, litersMl: 200000 }), { code: 'already-exists' });
 });
-test('authorization is checked on retry too', async () => {
+test('replay after assignment revocation returns the accepted result but cannot create a new request', async () => {
   const { db, documents } = fakeDb(); await invoke(db);
   documents.get('tenants/fleet/assignments/a1').active = false;
+  assert.equal((await invoke(db)).status, 'pending');
+  await assert.rejects(invoke(db, 'u1', { ...command, requestId: '223e4567-e89b-42d3-a456-426614174000' }), { code: 'permission-denied' });
+  documents.get('tenants/fleet/users/u1').active = false;
   await assert.rejects(invoke(db), { code: 'permission-denied' });
+});
+test('rejects volume above capacity or missing or invalid capacity', async () => {
+  const { db, documents } = fakeDb();
+  for (const capacity of [null, 0, 99999, 123.5]) {
+    documents.get('tenants/fleet/vehicles/v1').tankCapacityMl = capacity;
+    await assert.rejects(invoke(db), { code: 'failed-precondition' });
+  }
+  assert.equal(documents.size, 4);
+  documents.get('tenants/fleet/vehicles/v1').tankCapacityMl = 100000;
+  assert.equal((await invoke(db)).status, 'pending');
+  documents.get('tenants/fleet/vehicles/v1').tankCapacityMl = 50000;
+  assert.equal((await invoke(db)).status, 'pending');
 });
 test('denies missing auth, wrong user, role, tenant, vehicle or assignment', async () => {
   const { db, documents } = fakeDb();

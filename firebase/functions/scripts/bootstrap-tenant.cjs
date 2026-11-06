@@ -12,7 +12,7 @@ async function bootstrapTenant({ db, auth, serverTimestamp }, { tenantId, manage
   return db.runTransaction(async tx => {
     const existing = await tx.get(tenant);
     if (existing.exists) throw new Error('Tenant already exists; bootstrap will not modify it.');
-    tx.create(tenant, { active: true, name: 'پخش آل ناصر', timezone: 'Asia/Tehran', createdAt: serverTimestamp() });
+    tx.create(tenant, { active: true, name: 'پخش آل ناصر', timezone: 'Asia/Tehran', vehiclePlateIndexReady: true, createdAt: serverTimestamp() });
     tx.create(managerRef, { active: true, role: 'manager', createdAt: serverTimestamp() });
     tx.create(settings, { version: 1, monthlyQuotaMl: 300000, governmentPriceTomanPerLiter: 300, freePriceTomanPerLiter: 80000, createdAt: serverTimestamp() });
     tx.create(audit, { action: 'tenant.bootstrapped', actorType: 'bootstrap-cli', targetUid: managerUid, createdAt: serverTimestamp() });

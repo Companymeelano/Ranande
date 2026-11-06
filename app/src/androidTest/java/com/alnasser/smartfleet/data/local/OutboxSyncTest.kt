@@ -64,4 +64,17 @@ class OutboxSyncTest {
         assertEquals(SyncOutcome.RETRY, sync.run("fleet", "driver", maxBatch = 1))
         assertEquals(SyncOutcome.COMPLETE, sync.run("fleet", "driver", maxBatch = 1))
     }
+    @Test fun accountSwitchDuringSendKeepsCommandForOriginalOwner() = runBlocking {
+        dao.insert(item("request"))
+        var uid = "driver"
+        val sync = OutboxSync(dao, { uid }, { uid = "other"; SendOutcome.Rejected("permission_denied") }, { 100 })
+        assertEquals(SyncOutcome.SESSION_CHANGED, sync.run("fleet", "driver"))
+        val command = dao.observeForAccount("fleet", "driver").first().single()
+        assertEquals("PENDING", command.state)
+        assertEquals("session_changed", command.lastError)
+        uid = "driver"
+        val recovered = OutboxSync(dao, { uid }, { SendOutcome.Accepted }, { 200 })
+        assertEquals(SyncOutcome.COMPLETE, recovered.run("fleet", "driver"))
+    }
+
 }

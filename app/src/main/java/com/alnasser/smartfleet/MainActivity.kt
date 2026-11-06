@@ -149,7 +149,7 @@ private fun FleetScreen(model: FleetViewModel, tenant: String) {
     var plate by remember { mutableStateOf("") }
     var vehicleModel by remember { mutableStateOf("") }
     var capacity by remember { mutableStateOf("300") }
-    Text("ناوگان", style = MaterialTheme.typography.titleLarge)
+    OperationalHeader(R.drawable.icon_fleet, "ناوگان")
     Text(model.status, style = MaterialTheme.typography.bodySmall)
     if (model.vehicles.isEmpty()) Text("خودرویی برای نمایش وجود ندارد یا هنوز دریافت نشده است.")
     model.vehicles.forEach { vehicle ->
