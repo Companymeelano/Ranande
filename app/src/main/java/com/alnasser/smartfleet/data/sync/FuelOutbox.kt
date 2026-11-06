@@ -19,7 +19,8 @@ class FuelOutbox(private val context: Context) {
             .put("assignmentId", assignmentId).put("litersMl", litersMl).put("occurredAtMillis", occurredAtMillis)
         DatabaseProvider.get(context).outbox().insert(OutboxCommand(id, tenantId, uid, "fuelRequest", payload.toString(), System.currentTimeMillis()))
         // If the process dies before scheduling, the next successful sign-in schedules account recovery.
-        OutboxScheduler.schedule(context, tenantId, uid)
+        try { OutboxScheduler.schedule(context, tenantId, uid) }
+        catch (_: RuntimeException) { /* recovered on next sign-in; the command is already durable */ }
         return id
     }
 }

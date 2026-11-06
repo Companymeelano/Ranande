@@ -115,10 +115,14 @@ private fun LoginScreen(model: LoginViewModel) {
                         onDispose { fleet.stop() }
                     }
                     FleetScreen(fleet, state.tenantId)
-                } else {
-                    Text("امکانات این نقش در نسخه آزمایشی فعلی در دسترس نیست.")
                 }
-                Text("سوخت، مأموریت، GPS و گزارش‌ها هنوز پیاده‌سازی نشده‌اند.")
+                val fuel: FuelViewModel = viewModel()
+                DisposableEffect(state.tenantId, state.role) {
+                    fuel.start(state.tenantId, state.role)
+                    onDispose { fuel.stop() }
+                }
+                FuelScreen(fuel, state.role)
+                Text("مأموریت، GPS و گزارش‌ها هنوز پیاده‌سازی نشده‌اند.")
                 Button(onClick = model::signOut) { Text("خروج") }
             }
             else -> {

@@ -179,3 +179,31 @@ test('approval rejects unauthorized and stale settings without writes', async ()
   assert.equal((await db.collection('tenants/fleet/quotas').get()).size, 0);
   assert.equal((await db.doc(`tenants/fleet/fuelRequests/${requestId}`).get()).data().status, 'pending');
 });
+
+test('fuel and assignment reads are scoped by role and ownership; direct writes denied', async () => {
+  const { collection, query, where, getDocs, serverTimestamp } = require('firebase/firestore');
+  await db.doc('tenants/fleet/users/manager').set({ active: true, role: 'manager' });
+  await db.doc('tenants/fleet/users/accountant').set({ active: true, role: 'accountant' });
+  await db.doc('tenants/fleet/users/driver2').set({ active: true, role: 'driver' });
+  await db.doc('tenants/fleet/assignments/a2').set({ active: true, driverUid: 'driver2', vehicleId: 'v2' });
+  await db.doc('tenants/fleet/assignments/a3').set({ active: false, driverUid: 'driver', vehicleId: 'v3' });
+  await db.doc('tenants/fleet/fuelRequests/r1').set({ driverUid: 'driver', status: 'pending' });
+  await db.doc('tenants/fleet/fuelRequests/r2').set({ driverUid: 'driver2', status: 'pending' });
+  const driver = env.authenticatedContext('driver').firestore();
+  const accountant = env.authenticatedContext('accountant').firestore();
+  const manager = env.authenticatedContext('manager').firestore();
+  const assignments = collection(driver, 'tenants/fleet/assignments');
+  assert.equal((await getDocs(query(assignments, where('driverUid', '==', 'driver'), where('active', '==', true)))).size, 1);
+  await assertFails(getDocs(assignments));
+  await assertFails(getDoc(doc(driver, 'tenants/fleet/assignments/a2')));
+  await assertFails(getDoc(doc(driver, 'tenants/fleet/assignments/a3')));
+  const fuel = collection(driver, 'tenants/fleet/fuelRequests');
+  assert.equal((await getDocs(query(fuel, where('driverUid', '==', 'driver')))).size, 1);
+  await assertFails(getDocs(fuel));
+  assert.equal((await getDocs(collection(accountant, 'tenants/fleet/fuelRequests'))).size, 2);
+  assert.equal((await getDocs(collection(manager, 'tenants/fleet/fuelRequests'))).size, 2);
+  await assertFails(setDoc(doc(driver, 'tenants/fleet/fuelRequests/fake'), { driverUid: 'driver', createdAt: serverTimestamp() }));
+  await assertFails(setDoc(doc(manager, 'tenants/fleet/assignments/a4'), { driverUid: 'driver', active: true }));
+  await db.doc('tenants/fleet/users/driver').update({ active: false });
+  await assertFails(getDocs(query(assignments, where('driverUid', '==', 'driver'), where('active', '==', true))));
+});
