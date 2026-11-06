@@ -416,3 +416,46 @@ test('manager updates fuel policy through the authenticated callable', async () 
     assert.equal((await httpsCallable(functions, 'updateFuelSettings')(cmd)).data.settings.version, 2);
   } finally { await deleteClient(client); }
 });
+
+test('customer creation is scoped, atomic, replayable and private', async () => {
+  const { createCustomer } = require('../customers');
+  const deps = { db, serverTimestamp: () => FieldValue.serverTimestamp() };
+  await db.doc('tenants/fleet/users/manager').set({ active: true, role: 'manager' });
+  await db.doc('tenants/fleet/users/accountant').set({ active: true, role: 'accountant' });
+  const c = { tenantId: 'fleet', customerId: 'd23e4567-e89b-42d3-a456-426614174000', name: 'فروشگاه', address: 'تهران', phone: '۰۹۱۲۱۲۳۴۵۶۷' };
+  await assert.rejects(createCustomer(deps, 'driver', c), { code: 'permission-denied' });
+  assert.deepEqual(await Promise.all([createCustomer(deps, 'manager', c), createCustomer(deps, 'manager', c)]), [
+    { customerId: c.customerId, status: 'created' }, { customerId: c.customerId, status: 'created' },
+  ]);
+  await assert.rejects(createCustomer(deps, 'manager', { ...c, address: 'کرج' }), { code: 'already-exists' });
+  assert.equal((await db.collection('tenants/fleet/customers').get()).size, 1);
+  assert.equal((await db.collection('tenants/fleet/audit').get()).size, 1);
+  const manager = env.authenticatedContext('manager').firestore();
+  assert.equal((await getDoc(doc(manager, 'tenants/fleet/customers', c.customerId))).data().name, c.name);
+  await assertFails(setDoc(doc(manager, 'tenants/fleet/customers', c.customerId), { name: 'change' }));
+  await assertFails(getDoc(doc(env.authenticatedContext('accountant').firestore(), 'tenants/fleet/customers', c.customerId)));
+  await assertFails(getDoc(doc(env.authenticatedContext('driver').firestore(), 'tenants/fleet/customers', c.customerId)));
+  await db.doc('tenants/fleet/users/manager').update({ active: false });
+  await assert.rejects(createCustomer(deps, 'manager', c), { code: 'permission-denied' });
+  await assertFails(getDoc(doc(manager, 'tenants/fleet/customers', c.customerId)));
+});
+
+test('customer callable requires authenticated manager', async () => {
+  const { initializeApp: makeApp, deleteApp: deleteClient } = require('firebase/app');
+  const { getAuth, connectAuthEmulator, createUserWithEmailAndPassword, signOut } = require('firebase/auth');
+  const { getFunctions, connectFunctionsEmulator, httpsCallable } = require('firebase/functions');
+  const client = makeApp({ apiKey: 'emulator-only', projectId }, 'customer-callable');
+  try {
+    const auth = getAuth(client);
+    connectAuthEmulator(auth, `http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}`, { disableWarnings: true });
+    const user = await createUserWithEmailAndPassword(auth, 'customer-manager@example.test', 'test-password-123');
+    await db.doc(`tenants/fleet/users/${user.user.uid}`).set({ active: true, role: 'manager' });
+    const functions = getFunctions(client, 'us-central1');
+    connectFunctionsEmulator(functions, '127.0.0.1', 5001);
+    const command = { tenantId: 'fleet', customerId: 'e23e4567-e89b-42d3-a456-426614174000', name: 'مشتری', address: 'تهران', phone: '' };
+    assert.equal((await httpsCallable(functions, 'createCustomer')(command)).data.status, 'created');
+    assert.equal((await httpsCallable(functions, 'createCustomer')(command)).data.status, 'created');
+    await signOut(auth);
+    await assert.rejects(httpsCallable(functions, 'createCustomer')(command), e => e.code === 'functions/unauthenticated');
+  } finally { await deleteClient(client); }
+});

@@ -123,6 +123,8 @@ private fun LoginScreen(model: LoginViewModel) {
                     AssignmentScreen(assignments, fleet.vehicles)
                     val fuelSettings: FuelSettingsViewModel = viewModel()
                     FuelSettingsScreen(fuelSettings, state.tenantId)
+                    val customers: CustomerViewModel = viewModel()
+                    CustomerScreen(customers, state.tenantId)
                 }
                 val fuel: FuelViewModel = viewModel()
                 DisposableEffect(state.tenantId, state.role) {

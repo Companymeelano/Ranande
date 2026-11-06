@@ -21,6 +21,10 @@ service cloud.firestore {
       allow get: if manager(tenantId);
       allow list, write: if false;
     }
+    match /tenants/{tenantId}/customers/{customerId} {
+      allow read: if manager(tenantId);
+      allow write: if false;
+    }
     match /tenants/{tenantId}/vehicles/{vehicleId} {
       allow read: if manager(tenantId);
       // Vehicle creation and audit are atomic in the trusted callable.

@@ -73,3 +73,14 @@ exports.updateFuelSettings = onCall(async request => {
     throw new HttpsError('internal', 'Request could not be processed.');
   }
 });
+
+const { createCustomer } = require('./customers');
+exports.createCustomer = onCall(async request => {
+  try {
+    return await createCustomer({ db: getFirestore(), serverTimestamp: () => FieldValue.serverTimestamp() }, request.auth?.uid, request.data);
+  } catch (error) {
+    if (error instanceof CommandError) throw new HttpsError(error.code, error.message);
+    console.error('customer creation failed', error);
+    throw new HttpsError('internal', 'Request could not be processed.');
+  }
+});
