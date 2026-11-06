@@ -122,3 +122,60 @@ test('only active managers can read and create validated vehicles', async () => 
   await db.doc('tenants/fleet/users/manager').update({ active: false });
   await assertFails(getDocs(collection(manager, 'tenants/fleet/vehicles')));
 });
+
+const { fuelApproval } = require('../fuel-approval');
+const approvalDeps = () => ({ db, serverTimestamp: () => FieldValue.serverTimestamp(), now: () => new Date('2025-03-21T12:00:00Z') });
+const qFuel = id => fuelApproval(approvalDeps(), 'accountant', { tenantId: 'fleet', requestId: id }, false);
+const aFuel = (id, quote, uid = 'accountant') => fuelApproval(approvalDeps(), uid, { tenantId: 'fleet', requestId: id, quote }, true);
+async function seedFuelApproval() {
+  await db.doc('tenants/fleet/users/accountant').set({ active: true, role: 'accountant' });
+  await db.doc('tenants/fleet/settings/fuel').set({ version: 1, monthlyQuotaMl: 70000, governmentPriceTomanPerLiter: 300, freePriceTomanPerLiter: 80000 });
+  await submit(input);
+}
+
+test('financial confirmation is atomic, idempotent and snapshots rates', async () => {
+  await seedFuelApproval();
+  const { quote } = await qFuel(requestId);
+  assert.equal(quote.totalAmount, 2421000);
+  const results = await Promise.all([aFuel(requestId, quote), aFuel(requestId, quote)]);
+  assert.deepEqual(results[0], results[1]);
+  const quota = (await db.doc('tenants/fleet/quotas/v1_140401').get()).data();
+  assert.equal(quota.usedMl, 70000);
+  assert.equal(quota.version, 1);
+  assert.equal((await db.collection('tenants/fleet/fuelTransactions').get()).size, 1);
+  assert.equal((await db.collection('tenants/fleet/audit').get()).size, 1);
+  await db.doc('tenants/fleet/settings/fuel').update({ governmentPriceTomanPerLiter: 999, version: 2 });
+  assert.equal((await db.doc(`tenants/fleet/fuelTransactions/${requestId}`).get()).data().quote.governmentRate, 300);
+  const client = env.authenticatedContext('accountant').firestore();
+  await assertFails(getDoc(doc(client, 'tenants/fleet/fuelTransactions', requestId)));
+  await assertFails(setDoc(doc(client, 'tenants/fleet/quotas/v1_140401'), { usedMl: 0 }));
+});
+
+test('concurrent different approvals cannot exceed quota and stale quote requires review', async () => {
+  await seedFuelApproval();
+  const otherId = '223e4567-e89b-42d3-a456-426614174000';
+  await submit({ ...input, requestId: otherId });
+  const first = (await qFuel(requestId)).quote;
+  const second = (await qFuel(otherId)).quote;
+  const results = await Promise.allSettled([aFuel(requestId, first), aFuel(otherId, second)]);
+  assert.equal(results.filter(r => r.status === 'fulfilled').length, 1);
+  assert.equal(results.find(r => r.status === 'rejected').reason.code, 'failed-precondition');
+  const remaining = (await db.doc(`tenants/fleet/fuelRequests/${requestId}`).get()).data().status === 'pending' ? requestId : otherId;
+  const revised = (await qFuel(remaining)).quote;
+  assert.equal(revised.governmentMl, 0);
+  assert.equal(revised.freeMl, 100000);
+  await aFuel(remaining, revised);
+  assert.equal((await db.doc('tenants/fleet/quotas/v1_140401').get()).data().usedMl, 70000);
+  assert.equal((await db.collection('tenants/fleet/fuelTransactions').get()).size, 2);
+});
+
+test('approval rejects unauthorized and stale settings without writes', async () => {
+  await seedFuelApproval();
+  const quote = (await qFuel(requestId)).quote;
+  await assert.rejects(aFuel(requestId, quote, 'driver'), { code: 'permission-denied' });
+  await db.doc('tenants/fleet/settings/fuel').update({ freePriceTomanPerLiter: 90000, version: 2 });
+  await assert.rejects(aFuel(requestId, quote), { code: 'failed-precondition' });
+  assert.equal((await db.collection('tenants/fleet/fuelTransactions').get()).size, 0);
+  assert.equal((await db.collection('tenants/fleet/quotas').get()).size, 0);
+  assert.equal((await db.doc(`tenants/fleet/fuelRequests/${requestId}`).get()).data().status, 'pending');
+});
