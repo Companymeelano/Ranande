@@ -100,3 +100,25 @@ test('email account created by Auth emulator can read only its provisioned profi
     await deleteClientApp(clientApp);
   }
 });
+
+test('only active managers can read and create validated vehicles', async () => {
+  const { serverTimestamp, collection, getDocs, deleteDoc, updateDoc } = require('firebase/firestore');
+  await db.doc('tenants/fleet/users/manager').set({ active: true, role: 'manager' });
+  await db.doc('tenants/fleet/users/accountant').set({ active: true, role: 'accountant' });
+  const manager = env.authenticatedContext('manager').firestore();
+  const driver = env.authenticatedContext('driver').firestore();
+  const accountant = env.authenticatedContext('accountant').firestore();
+  const vehicle = { plate: 'Test-01', model: 'Isuzu', tankCapacityMl: 300000, active: true, createdBy: 'manager', createdAt: serverTimestamp() };
+  const path = 'tenants/fleet/vehicles/test';
+  await setDoc(doc(manager, path), vehicle);
+  assert.equal((await getDocs(collection(manager, 'tenants/fleet/vehicles'))).size, 2);
+  await assertFails(setDoc(doc(driver, 'tenants/fleet/vehicles/driver-test'), vehicle));
+  await assertFails(getDocs(collection(driver, 'tenants/fleet/vehicles')));
+  await assertFails(getDocs(collection(accountant, 'tenants/fleet/vehicles')));
+  await assertFails(setDoc(doc(manager, 'tenants/fleet/vehicles/invalid'), { ...vehicle, tankCapacityMl: -1 }));
+  await assertFails(setDoc(doc(manager, 'tenants/fleet/vehicles/forged'), { ...vehicle, createdBy: 'driver' }));
+  await assertFails(updateDoc(doc(manager, path), { plate: 'changed' }));
+  await assertFails(deleteDoc(doc(manager, path)));
+  await db.doc('tenants/fleet/users/manager').update({ active: false });
+  await assertFails(getDocs(collection(manager, 'tenants/fleet/vehicles')));
+});

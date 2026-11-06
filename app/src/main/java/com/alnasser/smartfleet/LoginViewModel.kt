@@ -16,7 +16,7 @@ sealed interface LoginState {
     data object Idle : LoginState
     data object Loading : LoginState
     data class Error(val message: String) : LoginState
-    data class SignedIn(val tenantId: String, val roleLabel: String) : LoginState
+    data class SignedIn(val tenantId: String, val roleLabel: String, val role: String) : LoginState
 }
 
 /** UI role display is not an authorization boundary; Firestore rules and server enforce access. */
@@ -58,7 +58,7 @@ class LoginViewModel : ViewModel() {
                                 else -> null
                             }
                             if (snapshot.exists() && snapshot.getBoolean("active") == true && role != null) {
-                                state = LoginState.SignedIn(tenantId, role)
+                                state = LoginState.SignedIn(tenantId, role, snapshot.getString("role")!!)
                             } else {
                                 signOutWithError("حساب فعال یا نقش معتبر یافت نشد.")
                             }
