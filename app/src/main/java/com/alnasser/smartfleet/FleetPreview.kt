@@ -28,6 +28,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,6 +39,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -59,7 +61,7 @@ private val features = listOf(
     Feature(R.drawable.icon_service, "سرویس و نگهداری", "SERVICE", "پیگیری سرویس دوره‌ای خودرو و یادآوری زمان رسیدگی.", "در حال توسعه؛ داده سرویس نمایش داده نمی‌شود."),
     Feature(R.drawable.icon_report, "گزارش‌های مدیریتی", "ANALYTICS", "مرور گزارش‌های ناوگان، مسافت و هزینه در یک نمای مدیریتی.", "در حال توسعه؛ گزارش یا نمودار ساختگی نمایش داده نمی‌شود."),
     Feature(R.drawable.icon_customer, "مشتریان", "CUSTOMERS", "مدیریت مقاصد پخش و اطلاعات مشتریان مجاز.", "در حال توسعه؛ اطلاعات مشتری ثبت نشده است."),
-    Feature(R.drawable.icon_cooling, "سیستم سرمایشی", "COLD CHAIN", "نگهداری و پیگیری سرویس تجهیزات اتاق یخچالی.", "در حال توسعه؛ دمای واقعی از GPS قابل استنتاج نیست."),
+    Feature(R.drawable.icon_settings, "تنظیمات آزمایشی", "SETTINGS", "تنظیم سهمیه و نرخ‌های آزمایشی این دستگاه.", "اطلاعات فقط روی این دستگاه ذخیره می‌شوند."),
 )
 
 @Composable
@@ -91,34 +93,27 @@ fun FleetPreview(onConnect: () -> Unit) {
     BackHandler(enabled = selected != null || tab != "overview") {
         if (selected != null) selected = null else tab = "overview"
     }
-    selected?.let { feature ->
-        AlertDialog(
-            onDismissRequest = { selected = null },
-            icon = { Image(painterResource(feature.icon), contentDescription = null, modifier = Modifier.size(64.dp)) },
-            title = { Text(feature.title, color = Color.White) },
-            text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(feature.description, color = Color(0xFFD9E4EA))
-                Text(feature.status, color = Gold, style = MaterialTheme.typography.bodySmall)
-            } },
-            confirmButton = { TextButton(onClick = { selected = null }) { Text("متوجه شدم", color = Gold) } },
-            containerColor = Color(0xFF14283A),
-        )
-    }
+    val context = LocalContext.current
+    val store = remember(context) { DemoStore(context.applicationContext) }
+    val scroll = rememberScrollState()
+    LaunchedEffect(tab, selected?.english) { scroll.scrollTo(0) }
     Column(Modifier.fillMaxSize().background(Background)) {
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
+        Column(Modifier.weight(1f).verticalScroll(scroll).padding(horizontal = 20.dp)) {
             Spacer(Modifier.height(20.dp))
             Header(onConnect)
+            Text("حالت آزمایشی • فقط همین دستگاه", color = Gold, fontSize = 11.sp, modifier = Modifier.padding(top = 12.dp))
             Spacer(Modifier.height(20.dp))
-            when (tab) {
-                "overview" -> {
+            when {
+                selected != null -> DemoModule(selected!!.english, store) { selected = null }
+                tab == "overview" -> {
                     Text("مدیریت هوشمند،", color = Color.White, fontSize = 27.sp, fontWeight = FontWeight.Bold)
                     Text("در مسیری مطمئن", color = Gold, fontSize = 27.sp, fontWeight = FontWeight.Bold)
                     Text("همراه ناوگان پخش آل ناصر", color = Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp, bottom = 20.dp))
                     HeroCard()
                     Spacer(Modifier.height(18.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                        Metric("خودروها", "—", Modifier.weight(1f))
-                        Metric("مأموریت‌ها", "—", Modifier.weight(1f))
+                        Metric("خودروها", java.text.NumberFormat.getIntegerInstance(java.util.Locale("fa", "IR")).format(store.list("vehicles").size), Modifier.weight(1f))
+                        Metric("مأموریت‌ها", java.text.NumberFormat.getIntegerInstance(java.util.Locale("fa", "IR")).format(store.list("missions").size), Modifier.weight(1f))
                         Metric("اتصال", "غیرفعال", Modifier.weight(1f))
                     }
                     Spacer(Modifier.height(24.dp))
@@ -127,9 +122,9 @@ fun FleetPreview(onConnect: () -> Unit) {
                     Spacer(Modifier.height(20.dp))
                     DemoNotice()
                 }
-                "modules" -> {
+                tab == "modules" -> {
                     Text("امکانات هوشمند", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
-                    Text("برای آشنایی با هر بخش، آن را انتخاب کنید.", color = Muted, modifier = Modifier.padding(top = 8.dp, bottom = 20.dp), fontSize = 13.sp)
+                    Text("برای ثبت و بررسی اطلاعات آزمایشی، یک بخش را انتخاب کنید.", color = Muted, modifier = Modifier.padding(top = 8.dp, bottom = 20.dp), fontSize = 13.sp)
                     FeatureGrid(features, onSelect = { selected = it })
                     Spacer(Modifier.height(20.dp))
                     DemoNotice()
@@ -138,7 +133,7 @@ fun FleetPreview(onConnect: () -> Unit) {
             }
             Spacer(Modifier.height(26.dp))
         }
-        BottomNavigation(tab = tab, onSelect = { tab = it })
+        BottomNavigation(tab = tab, onSelect = { tab = it; selected = null })
     }
 }
 
@@ -161,13 +156,13 @@ private fun HeroCard() {
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Panel).border(1.dp, Border, RoundedCornerShape(24.dp))) {
         Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             Column {
-                Text("ناوگان یخچال‌دار", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-                Text("COLD CHAIN FLEET", color = Gold, letterSpacing = 1.sp, fontSize = 9.sp, modifier = Modifier.padding(top = 4.dp))
+                Text("ناوگان پخش غذایی", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                Text("FOOD DISTRIBUTION FLEET", color = Gold, letterSpacing = 1.sp, fontSize = 9.sp, modifier = Modifier.padding(top = 4.dp))
             }
             Text("نمای معرفی", color = Color(0xFFBBD9E6), fontSize = 10.sp, modifier = Modifier.clip(RoundedCornerShape(50)).background(Color(0xFF28465A)).padding(horizontal = 10.dp, vertical = 6.dp))
         }
-        Image(painterResource(R.drawable.fleet_hero), contentDescription = "تصویر مفهومی خودروی یخچال‌دار", modifier = Modifier.fillMaxWidth().height(185.dp), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
-        Text("خودروها و وضعیت‌ها پس از اتصال نمایش داده می‌شوند", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp))
+        Image(painterResource(R.drawable.fleet_hero), contentDescription = "تصویر مفهومی ناوگان پخش مواد غذایی", modifier = Modifier.fillMaxWidth().height(185.dp), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+        Text("ثبت خودرو و مأموریت در حالت آزمایشی فعال است", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp))
     }
 }
 
@@ -212,8 +207,8 @@ private fun FeatureGrid(items: List<Feature>, onSelect: (Feature) -> Unit) {
 @Composable
 private fun DemoNotice() {
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color(0xFF1A2937)).border(1.dp, Gold.copy(alpha = .3f), RoundedCornerShape(18.dp)).padding(16.dp)) {
-        Text("حالت معرفی • بدون اتصال", color = Gold, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-        Text("این صفحه فقط برای آشنایی با طراحی و امکانات است؛ داده عملیاتی و اطلاعات ساختگی نمایش داده نمی‌شود.", color = Color(0xFFC5D1D9), fontSize = 12.sp, lineHeight = 21.sp, modifier = Modifier.padding(top = 6.dp))
+        Text("نسخه آزمایشی • اطلاعات محلی", color = Gold, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        Text("ثبت‌های آزمایشی فقط روی همین دستگاه ذخیره می‌شوند، با حساب واقعی همگام نیستند و برای عملیات واقعی مناسب نیستند.", color = Color(0xFFC5D1D9), fontSize = 12.sp, lineHeight = 21.sp, modifier = Modifier.padding(top = 6.dp))
     }
 }
 
