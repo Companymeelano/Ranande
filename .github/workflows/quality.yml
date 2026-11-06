@@ -51,7 +51,8 @@ jobs:
       - name: Build debug and test APKs
         run: |
           set -o pipefail
-          ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --console=plain 2>&1 | tee "$RUNNER_TEMP/gradle.log" || {
+          ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace --console=plain -Dorg.gradle.jvmargs=-Xmx768m 2>&1 | tee "$RUNNER_TEMP/gradle.log" || {
+            echo "::error::Gradle or tee failed with status $?"
             tail -50 "$RUNNER_TEMP/gradle.log" | while IFS= read -r line; do echo "::error::$line"; done
             exit 1
           }
