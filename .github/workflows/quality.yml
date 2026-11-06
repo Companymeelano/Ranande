@@ -36,6 +36,7 @@ jobs:
           set -euo pipefail
           export ANDROID_HOME="$RUNNER_TEMP/android-sdk"
           echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
           mkdir -p "$ANDROID_HOME/cmdline-tools"
           if ! curl -fsSL --retry 3 https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o "$RUNNER_TEMP/android-tools.zip"; then
             echo '::error::Unable to download Android SDK tools from Google'; exit 1
