@@ -62,3 +62,14 @@ exports.createVehicle = onCall(async request => {
     throw new HttpsError('internal', 'Request could not be processed.');
   }
 });
+
+const { updateFuelSettings } = require('./fuel-settings');
+exports.updateFuelSettings = onCall(async request => {
+  try {
+    return await updateFuelSettings({ db: getFirestore(), serverTimestamp: () => FieldValue.serverTimestamp() }, request.auth?.uid, request.data);
+  } catch (error) {
+    if (error instanceof CommandError) throw new HttpsError(error.code, error.message);
+    console.error('fuel settings update failed', error);
+    throw new HttpsError('internal', 'Request could not be processed.');
+  }
+});

@@ -48,6 +48,7 @@ fun DemoModule(module: String, store: DemoStore, back: () -> Unit) {
         "SERVICE" -> DemoServices(store, ::attempt)
         "ANALYTICS" -> DemoReports(store)
         "SETTINGS" -> DemoSettings(store, ::attempt)
+        "ACCOUNTS" -> DemoAccounts(store, ::attempt)
         else -> {
             Text("نقشه و موقعیت", style = MaterialTheme.typography.titleLarge)
             Text("مکان‌یابی و نقشه واقعی هنوز متصل نشده‌اند. در این بخش هیچ موقعیت، مسیر یا سرعت ساختگی نمایش داده نمی‌شود.")
@@ -176,4 +177,23 @@ private fun DemoSettings(store: DemoStore, attempt: (() -> Unit) -> Boolean) {
     if (confirm) AlertDialog(onDismissRequest = { confirm = false }, title = { Text("پاک‌کردن اطلاعات آزمایشی؟") }, text = { Text("تمام داده‌های آزمایشی همین دستگاه پاک می‌شود؛ داده حساب واقعی تغییر نمی‌کند.") },
         confirmButton = { TextButton(onClick = { if (attempt { store.clear() }) { quota = "300"; gov = "300"; free = "80000" }; confirm = false }) { Text("پاک‌کردن") } },
         dismissButton = { TextButton(onClick = { confirm = false }) { Text("انصراف") } })
+}
+
+
+@Composable
+private fun DemoAccounts(store: DemoStore, attempt: (() -> Unit) -> Boolean) {
+    var name by remember { mutableStateOf("") }
+    var role by remember { mutableStateOf("driver") }
+    OperationalHeader(R.drawable.icon_customer, "حساب‌های آزمایشی")
+    Text("این فرم فقط یک پروفایل نمایشی روی همین دستگاه می‌سازد؛ حساب ورود، رمز عبور یا دسترسی واقعی ایجاد نمی‌کند. اطلاعات واقعی و محرمانه وارد نکنید.")
+    Field(name, { name = it }, "نام نمایشی")
+    listOf("manager" to "مدیر", "accountant" to "حسابدار", "driver" to "راننده").forEach { (key, label) ->
+        Row(verticalAlignment = Alignment.CenterVertically) { RadioButton(selected = role == key, onClick = { role = key }); Text(label) }
+    }
+    Button(onClick = { if (attempt { store.addTestAccount(name, role) }) name = "" }, modifier = Modifier.fillMaxWidth()) { Text("ساخت پروفایل آزمایشی") }
+    if (store.list("accounts").isEmpty()) Empty("هنوز پروفایل آزمایشی ثبت نشده است.")
+    store.list("accounts").forEach { account -> Item {
+        val label = when (account.getString("role")) { "manager" -> "مدیر"; "accountant" -> "حسابدار"; else -> "راننده" }
+        Text(account.getString("name")); Text("$label • فقط نمایشی")
+    } }
 }

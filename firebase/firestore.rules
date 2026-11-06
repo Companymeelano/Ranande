@@ -17,6 +17,10 @@ service cloud.firestore {
         || (hasRole(tenantId, ['driver']) && resource.data.driverUid == request.auth.uid);
       allow write: if false;
     }
+    match /tenants/{tenantId}/settings/fuel {
+      allow get: if manager(tenantId);
+      allow list, write: if false;
+    }
     match /tenants/{tenantId}/vehicles/{vehicleId} {
       allow read: if manager(tenantId);
       // Vehicle creation and audit are atomic in the trusted callable.

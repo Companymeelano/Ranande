@@ -18,7 +18,7 @@ class DemoStore(context: Context, preferenceName: String = "isolated-demo-v1", p
     var data: JSONObject by mutableStateOf(load()); private set
 
     private fun emptyData() = JSONObject().put("version", 1).put("vehicles", JSONArray()).put("customers", JSONArray())
-        .put("missions", JSONArray()).put("fuel", JSONArray()).put("services", JSONArray())
+        .put("missions", JSONArray()).put("fuel", JSONArray()).put("services", JSONArray()).put("accounts", JSONArray())
         .put("settings", JSONObject().put("quotaMl", 300000L).put("govRate", 300L).put("freeRate", 80000L))
     private fun load(): JSONObject {
       return try {
@@ -27,6 +27,8 @@ class DemoStore(context: Context, preferenceName: String = "isolated-demo-v1", p
             require(obj.getInt("version") == 1)
             listOf("vehicles", "customers", "missions", "fuel", "services").forEach { obj.getJSONArray(it) }
             obj.getJSONObject("settings")
+            if (!obj.has("accounts")) obj.put("accounts", JSONArray())
+            obj.getJSONArray("accounts")
         }
       } catch (_: Exception) { error = "خواندن داده آزمایشی ناموفق بود؛ از پاک‌سازی آزمایشی استفاده کنید."; emptyData() }
     }
@@ -46,6 +48,11 @@ class DemoStore(context: Context, preferenceName: String = "isolated-demo-v1", p
     fun list(name: String): List<JSONObject> = (0 until data.getJSONArray(name).length()).map { data.getJSONArray(name).getJSONObject(it) }.reversed()
     private fun contains(data: JSONObject, key: String, id: String): Boolean = (0 until data.getJSONArray(key).length()).any { data.getJSONArray(key).getJSONObject(it).getString("id") == id }
     private fun id() = UUID.randomUUID().toString()
+
+    fun addTestAccount(name: String, role: String) = mutate { d ->
+        require(role in setOf("manager", "accountant", "driver")) { "نقش معتبر انتخاب کنید." }
+        append(d, "accounts", JSONObject().put("id", id()).put("name", text(name, "نام", 100)).put("role", role))
+    }
 
     fun addVehicle(plate: String, model: String) = mutate { d ->
         val p = text(plate, "پلاک", 40); val m = text(model, "مدل", 100)

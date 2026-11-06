@@ -51,6 +51,18 @@ class DemoStoreTest {
         store.advanceMission(id); assertEquals("active", store.list("missions").single().getString("status"))
         store.advanceMission(id); assertEquals("completed", store.list("missions").single().getString("status"))
     }
+    @Test fun testAccountsAreLocalProfilesAndOldDemoDataStillLoads() {
+        val prefs = context.getSharedPreferences(name, Context.MODE_PRIVATE)
+        val old = org.json.JSONObject(store.data.toString()).apply { remove("accounts") }
+        prefs.edit().putString("data", old.toString()).commit()
+        val migrated = DemoStore(context, name) { time }
+        assertTrue(migrated.list("accounts").isEmpty())
+        migrated.addTestAccount("نمونه", "driver")
+        try { migrated.addTestAccount("x", "admin"); fail("invalid role") } catch (_: IllegalArgumentException) { }
+        val account = DemoStore(context, name) { time }.list("accounts").single()
+        assertEquals("driver", account.getString("role")); assertFalse(account.has("password"))
+        migrated.clear(); assertTrue(migrated.list("accounts").isEmpty())
+    }
     @Test fun corruptedDataIsNotOverwrittenUntilExplicitClear() {
         context.getSharedPreferences(name, Context.MODE_PRIVATE).edit().putString("data", "bad json").commit()
         val broken = DemoStore(context, name) { time }

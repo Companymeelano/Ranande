@@ -369,3 +369,50 @@ test('legacy plate index migration fails closed on duplicates and unlocks clean 
   await assert.rejects(createVehicle(deps, 'manager', { ...newVehicle, plate: '12-ب-345' }), { code: 'already-exists' });
   assert.equal((await createVehicle(deps, 'manager', newVehicle)).status, 'created');
 });
+
+test('fuel policy changes are authorized, versioned, replayable and stale quotes fail', async () => {
+  const { updateFuelSettings } = require('../fuel-settings');
+  const { fuelApproval } = require('../fuel-approval');
+  const deps = { db, serverTimestamp: () => FieldValue.serverTimestamp(), now: () => new Date('2025-05-01T12:00:00Z') };
+  await db.doc('tenants/fleet/users/manager').set({ active: true, role: 'manager' });
+  await db.doc('tenants/fleet/users/accountant').set({ active: true, role: 'accountant' });
+  await db.doc('tenants/fleet/settings/fuel').set({ version: 1, monthlyQuotaMl: 300000, governmentPriceTomanPerLiter: 300, freePriceTomanPerLiter: 80000 });
+  await submit(input);
+  const quote = (await fuelApproval(deps, 'accountant', { tenantId: 'fleet', requestId }, false)).quote;
+  const change = { tenantId: 'fleet', commandId: 'a23e4567-e89b-42d3-a456-426614174000', expectedVersion: 1, monthlyQuotaMl: 200000, governmentPriceTomanPerLiter: 400, freePriceTomanPerLiter: 90000 };
+  await assert.rejects(updateFuelSettings(deps, 'accountant', change), { code: 'permission-denied' });
+  const competing = { ...change, commandId: 'b23e4567-e89b-42d3-a456-426614174000' };
+  const results = await Promise.allSettled([updateFuelSettings(deps, 'manager', change), updateFuelSettings(deps, 'manager', competing)]);
+  assert.equal(results.filter(r => r.status === 'fulfilled').length, 1);
+  assert.equal(results.find(r => r.status === 'rejected').reason.code, 'failed-precondition');
+  const winner = results[0].status === 'fulfilled' ? change : competing;
+  assert.equal((await updateFuelSettings(deps, 'manager', winner)).settings.version, 2);
+  await assert.rejects(updateFuelSettings(deps, 'manager', { ...winner, freePriceTomanPerLiter: 1 }), { code: 'already-exists' });
+  assert.equal((await db.collection('tenants/fleet/fuelSettingsChanges').get()).size, 1);
+  const saved = (await db.doc(`tenants/fleet/fuelSettingsChanges/${winner.commandId}`).get()).data();
+  assert.equal(saved.before.version, 1); assert.equal(saved.after.version, 2);
+  await assert.rejects(fuelApproval(deps, 'accountant', { tenantId: 'fleet', requestId, quote }, true), { code: 'failed-precondition' });
+  const manager = env.authenticatedContext('manager').firestore();
+  assert.equal((await getDoc(doc(manager, 'tenants/fleet/settings/fuel'))).data().version, 2);
+  await assertFails(setDoc(doc(manager, 'tenants/fleet/settings/fuel'), { version: 3 }));
+  await assertFails(getDoc(doc(env.authenticatedContext('driver').firestore(), 'tenants/fleet/settings/fuel')));
+});
+
+test('manager updates fuel policy through the authenticated callable', async () => {
+  const { initializeApp: makeApp, deleteApp: deleteClient } = require('firebase/app');
+  const { getAuth, connectAuthEmulator, createUserWithEmailAndPassword } = require('firebase/auth');
+  const { getFunctions, connectFunctionsEmulator, httpsCallable } = require('firebase/functions');
+  const client = makeApp({ apiKey: 'emulator-only', projectId }, 'settings-callable');
+  try {
+    const auth = getAuth(client);
+    connectAuthEmulator(auth, `http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}`, { disableWarnings: true });
+    const manager = await createUserWithEmailAndPassword(auth, 'settings-manager@example.test', 'test-password-123');
+    await db.doc(`tenants/fleet/users/${manager.user.uid}`).set({ active: true, role: 'manager' });
+    await db.doc('tenants/fleet/settings/fuel').set({ version: 1, monthlyQuotaMl: 300000, governmentPriceTomanPerLiter: 300, freePriceTomanPerLiter: 80000 });
+    const functions = getFunctions(client, 'us-central1');
+    connectFunctionsEmulator(functions, '127.0.0.1', 5001);
+    const cmd = { tenantId: 'fleet', commandId: 'c23e4567-e89b-42d3-a456-426614174000', expectedVersion: 1, monthlyQuotaMl: 300000, governmentPriceTomanPerLiter: 400, freePriceTomanPerLiter: 80000 };
+    assert.equal((await httpsCallable(functions, 'updateFuelSettings')(cmd)).data.settings.version, 2);
+    assert.equal((await httpsCallable(functions, 'updateFuelSettings')(cmd)).data.settings.version, 2);
+  } finally { await deleteClient(client); }
+});
