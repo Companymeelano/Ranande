@@ -28,7 +28,7 @@ class FirebaseFuelTransport(private val functions: FirebaseFunctions) {
                 "litersMl" to volume.toLong(), "occurredAtMillis" to occurredAt.toLong())
         } catch (_: Exception) { return SendOutcome.Rejected("invalid_payload") }
         return try {
-            val result = withTimeout(60_000) { functions.getHttpsCallable("submitFuelRequest").call(data).await().data }
+            val result = withTimeout(60_000) { functions.getHttpsCallable("submitFuelRequest").call(data).await().getData() }
             val response = result as? Map<*, *> ?: return SendOutcome.Retry("invalid_response")
             if (response["requestId"] != command.id.lowercase() || response["status"] !in setOf("pending", "approved", "rejected", "conflict"))
                 SendOutcome.Retry("invalid_response") else SendOutcome.Accepted
