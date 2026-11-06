@@ -59,7 +59,7 @@ class FleetViewModel : ViewModel() {
         if (saving) return
         val liters = capacityLiters.toLongOrNull()
         val uid = FirebaseAuth.getInstance().currentUser?.uid
-        if (tenant != currentTenant || uid == null || plate.isBlank() || plate.length > 40 || model.isBlank() || model.length > 100 || liters == null || liters !in 1..10000) {
+        if (tenant != currentTenant || uid == null || plate.isBlank() || plate.length > 40 || model.isBlank() || model.length > 100 || liters == null || liters !in 1L..10000L) {
             saveMessage = "پلاک، مدل و ظرفیت معتبر (۱ تا ۱۰٬۰۰۰ لیتر) را وارد کنید."
             return
         }
