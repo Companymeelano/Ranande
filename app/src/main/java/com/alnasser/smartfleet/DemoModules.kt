@@ -79,7 +79,7 @@ private fun VehiclePicker(store: DemoStore, selected: String?, onSelect: (String
 @Composable
 private fun DemoVehicles(store: DemoStore, attempt: (() -> Unit) -> Boolean) {
     var plate by remember { mutableStateOf("") }; var model by remember { mutableStateOf("") }
-    Text("ناوگان پخش مواد غذایی", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 16.dp))
+    Text("ناوگان پخش عمده کالا", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 16.dp))
     Field(plate, { plate = it }, "پلاک خودرو")
     Field(model, { model = it }, "مدل خودرو")
     Button(onClick = { if (attempt { store.addVehicle(plate, model) }) { plate = ""; model = "" } }, modifier = Modifier.fillMaxWidth()) { Text("ثبت خودروی آزمایشی") }
@@ -110,7 +110,7 @@ private fun DemoMissions(store: DemoStore, attempt: (() -> Unit) -> Boolean) {
     store.list("customers").forEach { c -> val id = c.getString("id"); Row(verticalAlignment = Alignment.CenterVertically) {
         Checkbox(id in customers, onCheckedChange = { customers = if (it) customers + id else customers - id }); Text(c.getString("name"))
     } }
-    Field(goods, { goods = it }, "شرح کالاهای غذایی")
+    Field(goods, { goods = it }, "شرح کالاهای پخش")
     Button(onClick = { if (attempt { store.addMission(vehicle ?: "", customers, goods) }) { goods = ""; customers = emptySet() } }, modifier = Modifier.fillMaxWidth()) { Text("ثبت مأموریت آزمایشی") }
     if (store.list("missions").isEmpty()) Empty("هنوز مأموریتی ثبت نشده است.")
     store.list("missions").forEach { m -> Item {

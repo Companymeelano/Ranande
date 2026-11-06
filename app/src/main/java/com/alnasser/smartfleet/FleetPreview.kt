@@ -156,12 +156,12 @@ private fun HeroCard() {
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Panel).border(1.dp, Border, RoundedCornerShape(24.dp))) {
         Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             Column {
-                Text("ناوگان پخش غذایی", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-                Text("FOOD DISTRIBUTION FLEET", color = Gold, letterSpacing = 1.sp, fontSize = 9.sp, modifier = Modifier.padding(top = 4.dp))
+                Text("ناوگان پخش عمده", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                Text("WHOLESALE DISTRIBUTION", color = Gold, letterSpacing = 1.sp, fontSize = 9.sp, modifier = Modifier.padding(top = 4.dp))
             }
             Text("نمای معرفی", color = Color(0xFFBBD9E6), fontSize = 10.sp, modifier = Modifier.clip(RoundedCornerShape(50)).background(Color(0xFF28465A)).padding(horizontal = 10.dp, vertical = 6.dp))
         }
-        Image(painterResource(R.drawable.fleet_hero), contentDescription = "تصویر مفهومی ناوگان پخش مواد غذایی", modifier = Modifier.fillMaxWidth().height(185.dp), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+        Image(painterResource(R.drawable.fleet_hero), contentDescription = "تصویر مفهومی ناوگان پخش کالاهای بسته‌بندی‌شده", modifier = Modifier.fillMaxWidth().height(185.dp), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
         Text("ثبت خودرو و مأموریت در حالت آزمایشی فعال است", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp))
     }
 }
