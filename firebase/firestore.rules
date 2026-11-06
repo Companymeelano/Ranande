@@ -1,0 +1,7 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Fail closed until role- and assignment-scoped rules are implemented and tested.
+    match /{document=**} { allow read, write: if false; }
+  }
+}
