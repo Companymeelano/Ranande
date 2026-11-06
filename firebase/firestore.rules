@@ -9,7 +9,7 @@ service cloud.firestore {
     }
     function manager(tenantId) { return hasRole(tenantId, ['manager']); }
     match /tenants/{tenantId}/assignments/{assignmentId} {
-      allow read: if hasRole(tenantId, ['driver']) && resource.data.driverUid == request.auth.uid && resource.data.active == true;
+      allow read: if manager(tenantId) || (hasRole(tenantId, ['driver']) && resource.data.driverUid == request.auth.uid && resource.data.active == true);
       allow write: if false;
     }
     match /tenants/{tenantId}/fuelRequests/{requestId} {

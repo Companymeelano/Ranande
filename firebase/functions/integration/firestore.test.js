@@ -247,3 +247,80 @@ test('authenticated callable submission, quote and confirmation run end to end',
     await deleteClient(app);
   }
 });
+
+const { changeAssignment } = require('../assignments');
+test('assignment create and revoke require manager, are idempotent, and leave an audit', async () => {
+  await db.doc('tenants/fleet/users/manager').set({ active: true, role: 'manager' });
+  await db.doc('tenants/fleet/users/accountant').set({ active: true, role: 'accountant' });
+  const assignmentId = '323e4567-e89b-42d3-a456-426614174000';
+  const data = { tenantId: 'fleet', assignmentId, driverUid: 'driver', vehicleId: 'v1' };
+  const deps = { db, serverTimestamp: () => FieldValue.serverTimestamp() };
+  await assert.rejects(changeAssignment(deps, 'accountant', data), { code: 'permission-denied' });
+  await assert.rejects(changeAssignment(deps, 'driver', data), { code: 'permission-denied' });
+  const result = await Promise.all([changeAssignment(deps, 'manager', data), changeAssignment(deps, 'manager', data)]);
+  assert.deepEqual(result[0], result[1]);
+  assert.equal(result[0].active, true);
+  await assert.rejects(changeAssignment(deps, 'manager', { ...data, driverUid: 'accountant' }), { code: 'failed-precondition' });
+  const manager = env.authenticatedContext('manager').firestore();
+  assert.equal((await getDoc(doc(manager, 'tenants/fleet/assignments', assignmentId))).data().active, true);
+  await assertFails(setDoc(doc(manager, 'tenants/fleet/assignments/new'), { active: true }));
+  const revoke = { tenantId: 'fleet', assignmentId };
+  assert.equal((await changeAssignment(deps, 'manager', revoke, true)).active, false);
+  assert.equal((await changeAssignment(deps, 'manager', revoke, true)).active, false);
+  assert.equal((await db.collection('tenants/fleet/audit').get()).size, 2);
+  const driver = env.authenticatedContext('driver').firestore();
+  await assertFails(getDoc(doc(driver, 'tenants/fleet/assignments', assignmentId)));
+});
+
+test('concurrent assignment creation cannot duplicate an active driver vehicle pair', async () => {
+  await db.doc('tenants/fleet/users/manager').set({ active: true, role: 'manager' });
+  const deps = { db, serverTimestamp: () => FieldValue.serverTimestamp() };
+  const a = { tenantId: 'fleet', assignmentId: '423e4567-e89b-42d3-a456-426614174000', driverUid: 'driver', vehicleId: 'v1' };
+  const b = { ...a, assignmentId: '523e4567-e89b-42d3-a456-426614174000' };
+  const results = await Promise.allSettled([changeAssignment(deps, 'manager', a), changeAssignment(deps, 'manager', b)]);
+  assert.equal(results.filter(r => r.status === 'fulfilled').length, 1);
+  assert.equal(results.find(r => r.status === 'rejected').reason.code, 'already-exists');
+  const winner = results.find(r => r.status === 'fulfilled').value.assignmentId;
+  await changeAssignment(deps, 'manager', { tenantId: 'fleet', assignmentId: winner }, true);
+  const next = winner === a.assignmentId ? b : a;
+  assert.equal((await changeAssignment(deps, 'manager', next)).active, true);
+});
+
+test('bootstrap creates a tenant once and never escalates access in an existing tenant', async () => {
+  const { bootstrapTenant } = require('../scripts/bootstrap-tenant.cjs');
+  const deps = { db, auth: { getUser: async uid => ({ uid, disabled: false }) }, serverTimestamp: () => FieldValue.serverTimestamp() };
+  await bootstrapTenant(deps, { tenantId: 'newfleet', managerUid: 'manager' });
+  assert.equal((await db.doc('tenants/newfleet/users/manager').get()).data().role, 'manager');
+  assert.equal((await db.doc('tenants/newfleet/settings/fuel').get()).data().monthlyQuotaMl, 300000);
+  await assert.rejects(bootstrapTenant(deps, { tenantId: 'newfleet', managerUid: 'other' }), /already exists/);
+  assert.equal((await db.doc('tenants/newfleet/users/other').get()).exists, false);
+  await assert.rejects(bootstrapTenant({ ...deps, auth: { getUser: async () => ({ disabled: true }) } }, { tenantId: 'disabledfleet', managerUid: 'disabled' }), /disabled/);
+  assert.equal((await db.doc('tenants/disabledfleet').get()).exists, false);
+});
+
+test('manager can assign and revoke via callable functions but a driver cannot', async () => {
+  const { initializeApp: makeApp, deleteApp: deleteClient } = require('firebase/app');
+  const { getAuth, connectAuthEmulator, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } = require('firebase/auth');
+  const { getFunctions, connectFunctionsEmulator, httpsCallable } = require('firebase/functions');
+  const app = makeApp({ apiKey: 'emulator-only', projectId }, 'assignment-callable');
+  try {
+    const auth = getAuth(app);
+    connectAuthEmulator(auth, `http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}`, { disableWarnings: true });
+    const functions = getFunctions(app, 'us-central1');
+    connectFunctionsEmulator(functions, '127.0.0.1', 5001);
+    const driver = await createUserWithEmailAndPassword(auth, 'assignment-driver@example.test', 'test-password-123');
+    const driverUid = driver.user.uid;
+    await signOut(auth);
+    const manager = await createUserWithEmailAndPassword(auth, 'assignment-manager@example.test', 'test-password-123');
+    await db.doc(`tenants/fleet/users/${driverUid}`).set({ active: true, role: 'driver' });
+    await db.doc(`tenants/fleet/users/${manager.user.uid}`).set({ active: true, role: 'manager' });
+    const assignment = { tenantId: 'fleet', assignmentId: '623e4567-e89b-42d3-a456-426614174000', driverUid, vehicleId: 'v1' };
+    assert.equal((await httpsCallable(functions, 'assignDriver')(assignment)).data.active, true);
+    await signOut(auth);
+    await signInWithEmailAndPassword(auth, 'assignment-driver@example.test', 'test-password-123');
+    await assert.rejects(httpsCallable(functions, 'revokeDriverAssignment')({ tenantId: 'fleet', assignmentId: assignment.assignmentId }), e => e.code === 'functions/permission-denied');
+    await signOut(auth);
+    await signInWithEmailAndPassword(auth, 'assignment-manager@example.test', 'test-password-123');
+    assert.equal((await httpsCallable(functions, 'revokeDriverAssignment')({ tenantId: 'fleet', assignmentId: assignment.assignmentId })).data.active, false);
+  } finally { await deleteClient(app); }
+});

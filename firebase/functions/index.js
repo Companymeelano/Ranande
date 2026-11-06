@@ -36,3 +36,18 @@ function approvalHandler(approve) {
 }
 exports.quoteFuelRequest = approvalHandler(false);
 exports.approveFuelRequest = approvalHandler(true);
+
+const { changeAssignment } = require('./assignments');
+function assignmentHandler(revoke) {
+  return onCall(async request => {
+    try {
+      return await changeAssignment({ db: getFirestore(), serverTimestamp: () => FieldValue.serverTimestamp() }, request.auth?.uid, request.data, revoke);
+    } catch (error) {
+      if (error instanceof CommandError) throw new HttpsError(error.code, error.message);
+      console.error('assignment command failed', error);
+      throw new HttpsError('internal', 'Request could not be processed.');
+    }
+  });
+}
+exports.assignDriver = assignmentHandler(false);
+exports.revokeDriverAssignment = assignmentHandler(true);

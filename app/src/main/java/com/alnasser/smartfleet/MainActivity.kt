@@ -115,6 +115,12 @@ private fun LoginScreen(model: LoginViewModel) {
                         onDispose { fleet.stop() }
                     }
                     FleetScreen(fleet, state.tenantId)
+                    val assignments: AssignmentViewModel = viewModel()
+                    DisposableEffect(state.tenantId) {
+                        assignments.start(state.tenantId)
+                        onDispose { assignments.stop() }
+                    }
+                    AssignmentScreen(assignments, fleet.vehicles)
                 }
                 val fuel: FuelViewModel = viewModel()
                 DisposableEffect(state.tenantId, state.role) {
