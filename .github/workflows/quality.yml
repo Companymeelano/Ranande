@@ -52,10 +52,10 @@ jobs:
       - name: Build debug and test APKs
         run: |
           set -o pipefail
-          ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace --console=plain -Dorg.gradle.jvmargs=-Xmx768m 2>&1 | tee "$RUNNER_TEMP/gradle.log" || {
+          ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --console=plain -Dorg.gradle.jvmargs=-Xmx768m 2>&1 | tee "$RUNNER_TEMP/gradle.log" || {
             echo "::error::Gradle or tee failed with status $?"
-            grep -E "(^e:|^w:| error:|^\* What went wrong:|^Execution failed for task|^> |^Caused by:)" "$RUNNER_TEMP/gradle.log" | head -50 | while IFS= read -r line; do echo "::error::$line"; done
-            tail -15 "$RUNNER_TEMP/gradle.log" | while IFS= read -r line; do echo "::error::$line"; done
+            grep -E "(^e:| error:|^\* What went wrong:|^Execution failed for task|^Caused by:|^> [^T])" "$RUNNER_TEMP/gradle.log" | head -50 | while IFS= read -r line; do echo "::error::$line"; done
+            tail -70 "$RUNNER_TEMP/gradle.log" | while IFS= read -r line; do echo "::error::$line"; done
             exit 1
           }
       - uses: actions/upload-artifact@v4
