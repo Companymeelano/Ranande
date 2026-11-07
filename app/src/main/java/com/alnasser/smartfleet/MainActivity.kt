@@ -125,6 +125,12 @@ private fun LoginScreen(model: LoginViewModel) {
                     FuelSettingsScreen(fuelSettings, state.tenantId)
                     val customers: CustomerViewModel = viewModel()
                     CustomerScreen(customers, state.tenantId)
+                    val missions: MissionViewModel = viewModel()
+                    MissionScreen(missions, state.tenantId, state.role, assignments.assignments, fleet.vehicles, customers.customers)
+                }
+                if (state.role == "driver") {
+                    val missions: MissionViewModel = viewModel()
+                    MissionScreen(missions, state.tenantId, state.role)
                 }
                 val fuel: FuelViewModel = viewModel()
                 DisposableEffect(state.tenantId, state.role) {
@@ -132,7 +138,7 @@ private fun LoginScreen(model: LoginViewModel) {
                     onDispose { fuel.stop() }
                 }
                 FuelScreen(fuel, state.role)
-                Text("مأموریت، GPS و گزارش‌ها هنوز پیاده‌سازی نشده‌اند.")
+                Text("تحویل، GPS زنده و گزارش‌های واقعی هنوز تکمیل نشده‌اند.")
                 Button(onClick = model::signOut) { Text("خروج") }
             }
             else -> {

@@ -459,3 +459,58 @@ test('customer callable requires authenticated manager', async () => {
     await assert.rejects(httpsCallable(functions, 'createCustomer')(command), e => e.code === 'functions/unauthenticated');
   } finally { await deleteClient(client); }
 });
+
+test('mission create, concurrency locks, access and state transitions are enforced', async () => {
+  const { createMission, transitionMission } = require('../missions');
+  const deps = { db, serverTimestamp: () => FieldValue.serverTimestamp() };
+  await db.doc('tenants/fleet/users/manager').set({ active: true, role: 'manager' });
+  await db.doc('tenants/fleet/users/other').set({ active: true, role: 'driver' });
+  await db.doc('tenants/fleet/customers/c1').set({ active: true, name: 'فروشگاه', address: 'تهران', phone: '' });
+  const c = { tenantId: 'fleet', missionId: 'a23e4567-e89b-42d3-a456-426614174000', assignmentId: 'a1', customerIds: ['c1'], goods: 'رب' };
+  const c2 = { ...c, missionId: 'b23e4567-e89b-42d3-a456-426614174000' };
+  await assert.rejects(createMission(deps, 'driver', c), { code: 'permission-denied' });
+  await createMission(deps, 'manager', c); await createMission(deps, 'manager', c2);
+  assert.equal((await createMission(deps, 'manager', c)).status, 'planned');
+  await assert.rejects(createMission(deps, 'manager', { ...c, goods: 'ماکارونی' }), { code: 'already-exists' });
+  const action = (missionId, action) => ({ tenantId: 'fleet', missionId, action });
+  await assert.rejects(transitionMission(deps, 'other', action(c.missionId, 'start')), { code: 'permission-denied' });
+  const outcomes = await Promise.allSettled([transitionMission(deps, 'driver', action(c.missionId, 'start')), transitionMission(deps, 'driver', action(c2.missionId, 'start'))]);
+  assert.equal(outcomes.filter(o => o.status === 'fulfilled').length, 1);
+  assert.equal(outcomes.find(o => o.status === 'rejected').reason.code, 'already-exists');
+  const winner = outcomes[0].status === 'fulfilled' ? c : c2;
+  const loser = winner === c ? c2 : c;
+  assert.equal((await transitionMission(deps, 'driver', action(winner.missionId, 'start'))).status, 'active');
+  const driver = env.authenticatedContext('driver').firestore(), other = env.authenticatedContext('other').firestore();
+  assert.equal((await getDoc(doc(driver, 'tenants/fleet/missions', winner.missionId))).data().destinations[0].name, 'فروشگاه');
+  await assertFails(getDoc(doc(other, 'tenants/fleet/missions', winner.missionId)));
+  await assertFails(setDoc(doc(driver, 'tenants/fleet/missions', winner.missionId), { status: 'finished' }));
+  await db.doc('tenants/fleet/assignments/a1').update({ active: false });
+  assert.equal((await transitionMission(deps, 'manager', action(winner.missionId, 'finish'))).status, 'finished');
+  assert.equal((await transitionMission(deps, 'driver', action(winner.missionId, 'finish'))).status, 'finished');
+  await assert.rejects(transitionMission(deps, 'driver', action(loser.missionId, 'start')), { code: 'failed-precondition' });
+  await db.doc('tenants/fleet/assignments/a1').update({ active: true });
+  assert.equal((await transitionMission(deps, 'driver', action(loser.missionId, 'start'))).status, 'active');
+});
+
+test('mission callable flows through authenticated emulator', async () => {
+  const { initializeApp: makeApp, deleteApp: deleteClient } = require('firebase/app');
+  const { getAuth, connectAuthEmulator, createUserWithEmailAndPassword, signOut, signInWithEmailAndPassword } = require('firebase/auth');
+  const { getFunctions, connectFunctionsEmulator, httpsCallable } = require('firebase/functions');
+  const client = makeApp({ apiKey: 'emulator-only', projectId }, 'mission-callable');
+  try {
+    const auth = getAuth(client); connectAuthEmulator(auth, `http://${process.env.FIREBASE_AUTH_EMULATOR_HOST}`, { disableWarnings: true });
+    const driver = await createUserWithEmailAndPassword(auth, 'mission-driver@example.test', 'test-password-123');
+    const driverUid = driver.user.uid; await signOut(auth);
+    const manager = await createUserWithEmailAndPassword(auth, 'mission-manager@example.test', 'test-password-123');
+    await db.doc(`tenants/fleet/users/${driverUid}`).set({ active: true, role: 'driver' });
+    await db.doc(`tenants/fleet/users/${manager.user.uid}`).set({ active: true, role: 'manager' });
+    await db.doc('tenants/fleet/assignments/a1').set({ active: true, driverUid, vehicleId: 'v1' });
+    await db.doc('tenants/fleet/customers/c1').set({ active: true, name: 'مشتری', address: 'تهران', phone: '' });
+    const functions = getFunctions(client, 'us-central1'); connectFunctionsEmulator(functions, '127.0.0.1', 5001);
+    const cmd = { tenantId: 'fleet', missionId: 'c23e4567-e89b-42d3-a456-426614174000', assignmentId: 'a1', customerIds: ['c1'], goods: 'آبمیوه' };
+    assert.equal((await httpsCallable(functions, 'createMission')(cmd)).data.status, 'planned');
+    await signOut(auth); await signInWithEmailAndPassword(auth, 'mission-driver@example.test', 'test-password-123');
+    assert.equal((await httpsCallable(functions, 'transitionMission')({ tenantId: 'fleet', missionId: cmd.missionId, action: 'start' })).data.status, 'active');
+    assert.equal((await httpsCallable(functions, 'transitionMission')({ tenantId: 'fleet', missionId: cmd.missionId, action: 'finish' })).data.status, 'finished');
+  } finally { await deleteClient(client); }
+});

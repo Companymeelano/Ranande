@@ -84,3 +84,17 @@ exports.createCustomer = onCall(async request => {
     throw new HttpsError('internal', 'Request could not be processed.');
   }
 });
+
+const { createMission, transitionMission } = require('./missions');
+function missionHandler(handler) {
+  return onCall(async request => {
+    try { return await handler({ db: getFirestore(), serverTimestamp: () => FieldValue.serverTimestamp() }, request.auth?.uid, request.data); }
+    catch (error) {
+      if (error instanceof CommandError) throw new HttpsError(error.code, error.message);
+      console.error('mission command failed', error);
+      throw new HttpsError('internal', 'Request could not be processed.');
+    }
+  });
+}
+exports.createMission = missionHandler(createMission);
+exports.transitionMission = missionHandler(transitionMission);
