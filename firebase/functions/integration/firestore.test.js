@@ -511,6 +511,62 @@ test('mission callable flows through authenticated emulator', async () => {
     assert.equal((await httpsCallable(functions, 'createMission')(cmd)).data.status, 'planned');
     await signOut(auth); await signInWithEmailAndPassword(auth, 'mission-driver@example.test', 'test-password-123');
     assert.equal((await httpsCallable(functions, 'transitionMission')({ tenantId: 'fleet', missionId: cmd.missionId, action: 'start' })).data.status, 'active');
+    const report = { tenantId: 'fleet', missionId: cmd.missionId, customerId: 'c1', outcome: 'delivered', recipient: 'فروشنده', note: '' };
+    assert.equal((await httpsCallable(functions, 'recordMissionDelivery')(report)).data.status, 'recorded');
+    assert.equal((await httpsCallable(functions, 'recordMissionDelivery')(report)).data.status, 'recorded');
     assert.equal((await httpsCallable(functions, 'transitionMission')({ tenantId: 'fleet', missionId: cmd.missionId, action: 'finish' })).data.status, 'finished');
   } finally { await deleteClient(client); }
+});
+
+test('destination reports are authorized, immutable, concurrent safe and replayable after route finish', async () => {
+  const { createMission, transitionMission, recordMissionDelivery } = require('../missions');
+  const deps = { db, serverTimestamp: () => FieldValue.serverTimestamp() };
+  await db.doc('tenants/fleet/users/manager').set({ active: true, role: 'manager' });
+  await db.doc('tenants/fleet/users/other').set({ active: true, role: 'driver' });
+  await db.doc('tenants/fleet/customers/c1').set({ active: true, name: 'الف', address: 'تهران', phone: '' });
+  await db.doc('tenants/fleet/customers/c2').set({ active: true, name: 'ب', address: 'کرج', phone: '' });
+  const missionId = 'd23e4567-e89b-42d3-a456-426614174000';
+  await createMission(deps, 'manager', { tenantId: 'fleet', missionId, assignmentId: 'a1', customerIds: ['c1', 'c2'], goods: 'کالا' });
+  const delivery = { tenantId: 'fleet', missionId, customerId: 'c1', outcome: 'delivered', recipient: 'مسئول فروشگاه', note: '' };
+  await assert.rejects(recordMissionDelivery(deps, 'driver', delivery), { code: 'failed-precondition' });
+  await transitionMission(deps, 'driver', { tenantId: 'fleet', missionId, action: 'start' });
+  await assert.rejects(recordMissionDelivery(deps, 'other', delivery), { code: 'permission-denied' });
+  await assert.rejects(recordMissionDelivery(deps, 'manager', delivery), { code: 'permission-denied' });
+  await assert.rejects(recordMissionDelivery(deps, 'driver', { ...delivery, customerId: 'nope' }), { code: 'failed-precondition' });
+  const alternate = { ...delivery, outcome: 'not_delivered', recipient: '', note: 'بسته بود' };
+  const both = await Promise.allSettled([recordMissionDelivery(deps, 'driver', delivery), recordMissionDelivery(deps, 'driver', alternate)]);
+  assert.equal(both.filter(r => r.status === 'fulfilled').length, 1);
+  assert.equal(both.find(r => r.status === 'rejected').reason.code, 'already-exists');
+  const winner = both[0].status === 'fulfilled' ? delivery : alternate;
+  const second = { ...alternate, customerId: 'c2' };
+  await db.doc('tenants/fleet/assignments/a1').update({ active: false });
+  await assert.rejects(recordMissionDelivery(deps, 'driver', second), { code: 'failed-precondition' });
+  await db.doc('tenants/fleet/assignments/a1').update({ active: true });
+  await recordMissionDelivery(deps, 'driver', second);
+  assert.equal((await db.doc(`tenants/fleet/missions/${missionId}`).get()).data().deliveryResults.length, 2);
+  await transitionMission(deps, 'driver', { tenantId: 'fleet', missionId, action: 'finish' });
+  assert.equal((await recordMissionDelivery(deps, 'driver', winner)).status, 'recorded');
+  assert.equal((await db.collection('tenants/fleet/audit').get()).size, 5);
+});
+
+test('concurrent route finish and destination report never write a new result after finish', async () => {
+  const { createMission, transitionMission, recordMissionDelivery } = require('../missions');
+  const deps = { db, serverTimestamp: () => FieldValue.serverTimestamp() };
+  await db.doc('tenants/fleet/users/manager').set({ active: true, role: 'manager' });
+  await db.doc('tenants/fleet/customers/c1').set({ active: true, name: 'الف', address: 'تهران', phone: '' });
+  const missionId = 'e23e4567-e89b-42d3-a456-426614174000';
+  await createMission(deps, 'manager', { tenantId: 'fleet', missionId, assignmentId: 'a1', customerIds: ['c1'], goods: 'کالا' });
+  const action = { tenantId: 'fleet', missionId, action: 'start' };
+  await transitionMission(deps, 'driver', action);
+  const report = { tenantId: 'fleet', missionId, customerId: 'c1', outcome: 'not_delivered', recipient: '', note: 'تعطیل' };
+  const [finish, delivery] = await Promise.allSettled([transitionMission(deps, 'driver', { ...action, action: 'finish' }), recordMissionDelivery(deps, 'driver', report)]);
+  assert.equal(finish.status, 'fulfilled');
+  if (delivery.status === 'rejected') {
+    assert.equal(delivery.reason.code, 'failed-precondition');
+    assert.equal((await db.doc(`tenants/fleet/missions/${missionId}`).get()).data().deliveryResults, undefined);
+    await assert.rejects(recordMissionDelivery(deps, 'driver', report), { code: 'failed-precondition' });
+  } else {
+    assert.equal((await db.doc(`tenants/fleet/missions/${missionId}`).get()).data().deliveryResults.length, 1);
+    assert.equal((await recordMissionDelivery(deps, 'driver', report)).status, 'recorded');
+  }
 });

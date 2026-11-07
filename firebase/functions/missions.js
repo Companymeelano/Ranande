@@ -82,4 +82,48 @@ async function transitionMission({ db, serverTimestamp }, uid, data) {
     return { missionId: ref.id, status: target };
   });
 }
-module.exports = { createMission, transitionMission };
+/** A driver's statement, not independent proof of delivery. Records are immutable. */
+async function recordMissionDelivery({ db, serverTimestamp, now = () => new Date() }, uid, data) {
+  authorize(uid, data, ['tenantId', 'missionId', 'customerId', 'outcome', 'recipient', 'note']);
+  const text = (v, max) => typeof v === 'string' && v === v.trim() && v.length <= max && !/[\p{Cc}\p{Cs}]/u.test(v);
+  if (!validId(data.customerId) || !['delivered', 'not_delivered'].includes(data.outcome) ||
+      !text(data.recipient, 100) || !text(data.note, 300) ||
+      (data.outcome === 'delivered' && !data.recipient) || (data.outcome === 'not_delivered' && !data.note) ||
+      (data.outcome === 'not_delivered' && data.recipient))
+    throw new CommandError('invalid-argument', 'Invalid destination result.');
+  const tenant = db.collection('tenants').doc(data.tenantId), ref = tenant.collection('missions').doc(data.missionId.toLowerCase());
+  const recordedAt = now();
+  if (!(recordedAt instanceof Date) || !Number.isFinite(recordedAt.getTime())) throw new CommandError('internal', 'Clock unavailable.');
+  return db.runTransaction(async tx => {
+    const [ts, actor, mission] = await Promise.all([tenant, tenant.collection('users').doc(uid), ref].map(r => tx.get(r)));
+    if (!activeMember(ts, actor) || actor.data().role !== 'driver' || !mission.exists || mission.data().driverUid !== uid)
+      throw new CommandError('permission-denied', 'Driver access required.');
+    const m = mission.data();
+    if (!Array.isArray(m.customerIds) || m.customerIds.length < 1 || m.customerIds.length > 20 ||
+        new Set(m.customerIds).size !== m.customerIds.length || !m.customerIds.every(validId) || !m.customerIds.includes(data.customerId) ||
+        (m.deliveryResults !== undefined && !Array.isArray(m.deliveryResults)))
+      throw new CommandError('failed-precondition', 'Mission destinations are invalid.');
+    const results = m.deliveryResults || [];
+    if (results.length > m.customerIds.length || results.some(r => !r || !m.customerIds.includes(r.customerId)) ||
+        new Set(results.map(r => r.customerId)).size !== results.length)
+      throw new CommandError('failed-precondition', 'Destination results are invalid.');
+    const previous = results.find(r => r.customerId === data.customerId);
+    if (previous) {
+      if (previous.recordedBy !== uid || previous.outcome !== data.outcome || previous.recipient !== data.recipient || previous.note !== data.note)
+        throw new CommandError('already-exists', 'Destination already has a result.');
+      return { missionId: ref.id, customerId: data.customerId, status: 'recorded' };
+    }
+    if (m.status !== 'active' || !validId(m.assignmentId) || !validId(m.vehicleId))
+      throw new CommandError('failed-precondition', 'Mission is not active.');
+    const assignment = await tx.get(tenant.collection('assignments').doc(m.assignmentId));
+    if (!assignment.exists || assignment.data().active !== true || assignment.data().driverUid !== uid || assignment.data().vehicleId !== m.vehicleId)
+      throw new CommandError('failed-precondition', 'Assignment is no longer active.');
+    const result = { customerId: data.customerId, outcome: data.outcome, recipient: data.recipient, note: data.note, recordedBy: uid, recordedAt };
+    tx.update(ref, { deliveryResults: [...results, result] });
+    tx.create(tenant.collection('audit').doc(`mission-delivery-${ref.id}-${data.customerId}`), {
+      action: 'mission.destination_reported', actorUid: uid, missionId: ref.id, customerId: data.customerId, outcome: data.outcome, createdAt: serverTimestamp(),
+    });
+    return { missionId: ref.id, customerId: data.customerId, status: 'recorded' };
+  });
+}
+module.exports = { createMission, transitionMission, recordMissionDelivery };

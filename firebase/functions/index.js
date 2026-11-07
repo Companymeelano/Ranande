@@ -85,7 +85,7 @@ exports.createCustomer = onCall(async request => {
   }
 });
 
-const { createMission, transitionMission } = require('./missions');
+const { createMission, transitionMission, recordMissionDelivery } = require('./missions');
 function missionHandler(handler) {
   return onCall(async request => {
     try { return await handler({ db: getFirestore(), serverTimestamp: () => FieldValue.serverTimestamp() }, request.auth?.uid, request.data); }
@@ -98,3 +98,5 @@ function missionHandler(handler) {
 }
 exports.createMission = missionHandler(createMission);
 exports.transitionMission = missionHandler(transitionMission);
+
+exports.recordMissionDelivery = missionHandler(recordMissionDelivery);

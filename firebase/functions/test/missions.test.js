@@ -9,3 +9,10 @@ test('mission inputs fail closed', async () => {
     await assert.rejects(createMission({}, 'manager', { ...data, ...bad }), { code: 'invalid-argument' });
   await assert.rejects(transitionMission({}, 'driver', { tenantId: 'fleet', missionId: data.missionId, action: 'delete' }), { code: 'invalid-argument' });
 });
+
+test('destination result validates before database access', async () => {
+  const { recordMissionDelivery } = require('../missions');
+  const good = { tenantId: 'fleet', missionId: data.missionId, customerId: 'c1', outcome: 'delivered', recipient: 'علی', note: '' };
+  for (const invalid of [{ outcome: 'delivered', recipient: '' }, { outcome: 'not_delivered', recipient: '', note: '' }, { customerId: '../bad' }, { note: '\n' }, { outcome: 'not_delivered', recipient: 'x', note: 'closed' }])
+    await assert.rejects(recordMissionDelivery({}, 'driver', { ...good, ...invalid }), { code: 'invalid-argument' });
+});

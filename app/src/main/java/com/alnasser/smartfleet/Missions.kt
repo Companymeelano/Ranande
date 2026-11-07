@@ -35,7 +35,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
-data class MissionDestination(val name: String, val address: String, val phone: String)
+data class DestinationResult(val outcome: String, val recipient: String, val note: String)
+data class MissionDestination(val id: String, val name: String, val address: String, val phone: String, val result: DestinationResult?)
 data class MissionItem(val id: String, val driver: String, val vehicle: String, val goods: String, val status: String, val destinations: List<MissionDestination>)
 private data class MissionDraft(val tenant: String, val uid: String, val assignment: String, val customers: List<String>, val goods: String, val id: String)
 
@@ -67,12 +68,16 @@ class MissionViewModel : ViewModel() {
                     val vehicle = doc.getString("vehicleId") ?: return@mapNotNull null
                     val goods = doc.getString("goods") ?: return@mapNotNull null
                     val state = doc.getString("status") ?: return@mapNotNull null
+                    val results = (doc.get("deliveryResults") as? List<*>) ?: emptyList<Any>()
                     val destinations = (doc.get("destinations") as? List<*>)?.mapNotNull { entry ->
                         val item = entry as? Map<*, *> ?: return@mapNotNull null
+                        val destinationId = item["id"] as? String ?: return@mapNotNull null
                         val name = item["name"] as? String ?: return@mapNotNull null
                         val address = item["address"] as? String ?: return@mapNotNull null
                         val phone = item["phone"] as? String ?: return@mapNotNull null
-                        MissionDestination(name, address, phone)
+                        val reported = results.mapNotNull { it as? Map<*, *> }.firstOrNull { it["customerId"] == destinationId }
+                        val result = reported?.let { DestinationResult(it["outcome"] as? String ?: "unknown", it["recipient"] as? String ?: "", it["note"] as? String ?: "") }
+                        MissionDestination(destinationId, name, address, phone, result)
                     } ?: return@mapNotNull null
                     MissionItem(doc.id, driver, vehicle, goods, state, destinations)
                 }
@@ -95,6 +100,37 @@ class MissionViewModel : ViewModel() {
         val id = tenant ?: return
         if (missions.none { it.id == mission.id } || action !in listOf("start", "finish")) return
         execute("transitionMission", mapOf("tenantId" to id, "missionId" to mission.id, "action" to action), mission.id, created = false)
+    }
+    fun report(mission: MissionItem, destination: MissionDestination, outcome: String, recipientText: String, noteText: String) {
+        val id = tenant ?: return
+        val uid = account ?: return
+        if (busy || FirebaseAuth.getInstance().currentUser?.uid != uid || missions.none { it.id == mission.id } || destination !in mission.destinations) return
+        val recipient = if (outcome == "not_delivered") "" else recipientText.trim()
+        val note = noteText.trim()
+        if (outcome !in listOf("delivered", "not_delivered") || recipient.length > 100 || note.length > 300 ||
+            (outcome == "delivered" && recipient.isBlank()) || (outcome == "not_delivered" && note.isBlank()) ||
+            (recipient + note).any { it.isISOControl() }) {
+            message = "نام تحویل‌گیرنده یا علت عدم تحویل را معتبر وارد کنید."; return
+        }
+        val epoch = generation
+        busy = true; message = null
+        viewModelScope.launch {
+            try {
+                val input = mapOf("tenantId" to id, "missionId" to mission.id, "customerId" to destination.id, "outcome" to outcome, "recipient" to recipient, "note" to note)
+                val response = FirebaseFunctions.getInstance().getHttpsCallable("recordMissionDelivery").call(input).await().getData() as? Map<*, *>
+                if (response?.get("missionId") != mission.id || response?.get("customerId") != destination.id || response?.get("status") != "recorded") error("Invalid server response")
+                if (generation == epoch && FirebaseAuth.getInstance().currentUser?.uid == uid) message = "گزارش راننده با تأیید سرور ثبت شد."
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                if (generation == epoch) message = when ((e as? FirebaseFunctionsException)?.code) {
+                    FirebaseFunctionsException.Code.ALREADY_EXISTS -> "برای این مقصد قبلاً گزارشی ثبت شده؛ اصلاح آن هنوز در برنامه پشتیبانی نمی‌شود."
+                    FirebaseFunctionsException.Code.FAILED_PRECONDITION -> "مسیر یا انتساب فعال نیست، یا مقصد معتبر نیست."
+                    FirebaseFunctionsException.Code.PERMISSION_DENIED -> "دسترسی راننده تأیید نشد."
+                    FirebaseFunctionsException.Code.INVALID_ARGUMENT -> "اطلاعات گزارش معتبر نیست."
+                    else -> "نتیجه نامشخص است؛ فهرست را بررسی کنید و در صورت نیاز دقیقاً همین گزارش را دوباره ارسال کنید."
+                }
+            } finally { if (generation == epoch) busy = false }
+        }
     }
     private fun execute(function: String, input: Map<String, Any>, id: String, created: Boolean) {
         if (busy || FirebaseAuth.getInstance().currentUser?.uid != account) return
@@ -131,6 +167,7 @@ fun MissionScreen(model: MissionViewModel, tenant: String, role: String, assignm
     var selected by remember(tenant) { mutableStateOf(setOf<String>()) }
     var goods by remember(tenant) { mutableStateOf("") }
     var action by remember(tenant) { mutableStateOf<Pair<MissionItem, String>?>(null) }
+    var reporting by remember(tenant) { mutableStateOf<Pair<MissionItem, MissionDestination>?>(null) }
     LaunchedEffect(model.saveCount) { if (model.saveCount > 0) { selected = emptySet(); goods = "" } }
     OperationalHeader(R.drawable.icon_mission, "مأموریت‌های پخش")
     Text("ثبت و تغییر وضعیت نیاز به اتصال دارد. پایان مسیر به معنی تأیید تحویل، امضا یا رسید نیست.")
@@ -156,14 +193,49 @@ fun MissionScreen(model: MissionViewModel, tenant: String, role: String, assignm
         Text("خودرو: ${vehicles.find { it.id == mission.vehicle }?.plate ?: mission.vehicle}")
         if (role == "manager") Text("راننده: ${mission.driver}")
         Text("وضعیت: ${when (mission.status) { "planned" -> "برنامه‌ریزی‌شده"; "active" -> "در مسیر"; "finished" -> "مسیر پایان‌یافته"; else -> "نامشخص" }}")
-        mission.destinations.forEach { d -> Text("${d.name} • ${d.address}${if (d.phone.isNotEmpty()) " • ${d.phone}" else ""}") }
+        mission.destinations.forEach { d ->
+            Text("${d.name} • ${d.address}${if (d.phone.isNotEmpty()) " • ${d.phone}" else ""}")
+            val result = d.result
+            if (result == null) {
+                Text("نتیجه مقصد ثبت نشده است.")
+                if (role == "driver" && mission.status == "active") TextButton(onClick = { reporting = mission to d }, enabled = !model.busy) { Text("ثبت گزارش مقصد") }
+            } else {
+                Text("گزارش راننده: ${when (result.outcome) { "delivered" -> "تحویل‌شده"; "not_delivered" -> "تحویل‌نشده"; else -> "نامشخص" }}")
+                if (result.recipient.isNotEmpty()) Text("نام ثبت‌شده تحویل‌گیرنده: ${result.recipient}")
+                if (result.note.isNotEmpty()) Text("توضیح: ${result.note}")
+            }
+        }
         if ((role == "driver" && mission.status == "planned") || (mission.status == "active" && (role == "driver" || role == "manager"))) {
             val next = if (mission.status == "planned") "start" else "finish"
             TextButton(onClick = { action = mission to next }, enabled = !model.busy) { Text(if (next == "start") "شروع مسیر" else "پایان مسیر") }
         }
     } } }
+    reporting?.let { (m, d) -> DeliveryReportDialog(m, d, model.busy, dismiss = { reporting = null }, submit = { outcome, recipient, note ->
+        model.report(m, d, outcome, recipient, note); reporting = null
+    }) }
     action?.let { (m, next) -> AlertDialog(onDismissRequest = { action = null }, title = { Text(if (next == "start") "شروع مسیر؟" else "پایان مسیر؟") },
-        text = { Text(if (next == "start") "برای این راننده و خودرو مسیر فعال دیگری نباید وجود داشته باشد." else "این فقط پایان مسیر را ثبت می‌کند و تأیید تحویل کالا نیست.") },
+        text = { Text(if (next == "start") "برای این راننده و خودرو مسیر فعال دیگری نباید وجود داشته باشد." else "این فقط پایان مسیر را ثبت می‌کند و تأیید تحویل کالا نیست. ${m.destinations.count { it.result == null }} مقصد هنوز گزارش ندارد؛ پس از پایان، ثبت گزارش جدید ممکن نیست.") },
         confirmButton = { TextButton(onClick = { model.transition(m, next); action = null }) { Text("تأیید") } },
         dismissButton = { TextButton(onClick = { action = null }) { Text("انصراف") } }) }
+}
+
+
+@Composable
+private fun DeliveryReportDialog(mission: MissionItem, destination: MissionDestination, busy: Boolean, dismiss: () -> Unit, submit: (String, String, String) -> Unit) {
+    var outcome by remember(mission.id, destination.id) { mutableStateOf("delivered") }
+    var recipient by remember(mission.id, destination.id) { mutableStateOf("") }
+    var note by remember(mission.id, destination.id) { mutableStateOf("") }
+    val valid = (outcome == "delivered" && recipient.isNotBlank() && recipient.trim().length <= 100 || outcome == "not_delivered" && note.isNotBlank()) && note.trim().length <= 300 && !(recipient + note).any { it.isISOControl() }
+    AlertDialog(onDismissRequest = dismiss, title = { Text("گزارش مقصد: ${destination.name}") }, text = {
+        Column {
+            Text("این اطلاعات اظهاری راننده است؛ امضا یا رسید تأییدشده نیست. پس از ثبت امکان اصلاح در برنامه وجود ندارد.")
+            listOf("delivered" to "تحویل‌شده", "not_delivered" to "تحویل‌نشده").forEach { (value, label) ->
+                Row(verticalAlignment = Alignment.CenterVertically) { RadioButton(selected = outcome == value, onClick = { outcome = value }); Text(label) }
+            }
+            if (outcome == "delivered") OutlinedTextField(recipient, { recipient = it }, label = { Text("نام تحویل‌گیرنده") }, singleLine = true)
+            OutlinedTextField(note, { note = it }, label = { Text(if (outcome == "not_delivered") "علت عدم تحویل" else "توضیح (اختیاری)") }, singleLine = true)
+            if (!valid) Text("نام تحویل‌گیرنده یا علت عدم تحویل را وارد کنید؛ حداکثر نام ۱۰۰ و توضیح ۳۰۰ نویسه است.")
+        }
+    }, confirmButton = { TextButton(enabled = !busy && valid, onClick = { submit(outcome, recipient, note) }) { Text("ثبت گزارش") } },
+       dismissButton = { TextButton(onClick = dismiss) { Text("انصراف") } })
 }
