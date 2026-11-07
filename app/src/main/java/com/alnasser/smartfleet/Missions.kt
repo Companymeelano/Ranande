@@ -193,6 +193,7 @@ fun MissionScreen(model: MissionViewModel, tenant: String, role: String, assignm
         Text("خودرو: ${vehicles.find { it.id == mission.vehicle }?.plate ?: mission.vehicle}")
         if (role == "manager") Text("راننده: ${mission.driver}")
         Text("وضعیت: ${when (mission.status) { "planned" -> "برنامه‌ریزی‌شده"; "active" -> "در مسیر"; "finished" -> "مسیر پایان‌یافته"; else -> "نامشخص" }}")
+        if (role == "driver" && mission.status == "active") MissionGps(mission, tenant)
         mission.destinations.forEach { d ->
             Text("${d.name} • ${d.address}${if (d.phone.isNotEmpty()) " • ${d.phone}" else ""}")
             val result = d.result
