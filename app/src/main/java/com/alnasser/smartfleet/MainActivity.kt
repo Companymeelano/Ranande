@@ -138,7 +138,11 @@ private fun LoginScreen(model: LoginViewModel) {
                     onDispose { fuel.stop() }
                 }
                 FuelScreen(fuel, state.role)
-                Text("تحویل، GPS زنده و گزارش‌های واقعی هنوز تکمیل نشده‌اند.")
+                if (state.role == "manager" || state.role == "accountant") {
+                    val fuelReport: FuelReportViewModel = viewModel()
+                    FuelReportScreen(fuelReport, state.tenantId, state.role)
+                }
+                Text("تحویل، GPS زنده و گزارش‌های جامع هنوز تکمیل نشده‌اند.")
                 Button(onClick = model::signOut) { Text("خروج") }
             }
             else -> {

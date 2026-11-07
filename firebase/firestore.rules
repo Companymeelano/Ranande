@@ -17,6 +17,10 @@ service cloud.firestore {
         || (hasRole(tenantId, ['driver']) && resource.data.driverUid == request.auth.uid);
       allow write: if false;
     }
+    match /tenants/{tenantId}/fuelTransactions/{requestId} {
+      allow read: if hasRole(tenantId, ['manager', 'accountant']);
+      allow write: if false;
+    }
     match /tenants/{tenantId}/settings/fuel {
       allow get: if manager(tenantId);
       allow list, write: if false;

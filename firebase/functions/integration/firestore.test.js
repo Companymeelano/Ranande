@@ -145,7 +145,7 @@ test('financial confirmation is atomic, idempotent and snapshots rates', async (
   await db.doc('tenants/fleet/settings/fuel').update({ governmentPriceTomanPerLiter: 999, version: 2 });
   assert.equal((await db.doc(`tenants/fleet/fuelTransactions/${requestId}`).get()).data().quote.governmentRate, 300);
   const client = env.authenticatedContext('accountant').firestore();
-  await assertFails(getDoc(doc(client, 'tenants/fleet/fuelTransactions', requestId)));
+  assert.equal((await getDoc(doc(client, 'tenants/fleet/fuelTransactions', requestId))).data().quote.totalAmount, 2421000);
   await assertFails(setDoc(doc(client, 'tenants/fleet/quotas/v1_140401'), { usedMl: 0 }));
 });
 
@@ -569,4 +569,26 @@ test('concurrent route finish and destination report never write a new result af
     assert.equal((await db.doc(`tenants/fleet/missions/${missionId}`).get()).data().deliveryResults.length, 1);
     assert.equal((await recordMissionDelivery(deps, 'driver', report)).status, 'recorded');
   }
+});
+
+
+test('approved fuel ledger report is read-only and scoped to active finance roles', async () => {
+  const { collection, getDocs, query, orderBy, limit } = require('firebase/firestore');
+  await seedFuelApproval();
+  await db.doc('tenants/fleet/users/manager').set({ active: true, role: 'manager' });
+  await db.doc('tenants/other').set({ active: true });
+  await db.doc('tenants/other/fuelTransactions/secret').set({ quote: { totalAmount: 123 }, approvedAt: FieldValue.serverTimestamp() });
+  const quote = (await qFuel(requestId)).quote; await aFuel(requestId, quote);
+  for (const uid of ['manager', 'accountant']) {
+    const client = env.authenticatedContext(uid).firestore();
+    const records = await getDocs(query(collection(client, 'tenants/fleet/fuelTransactions'), orderBy('approvedAt', 'desc'), limit(51)));
+    assert.equal(records.size, 1); assert.equal(records.docs[0].data().quote.totalAmount, 2421000);
+    await assertFails(setDoc(doc(client, 'tenants/fleet/fuelTransactions', requestId), { quote: { totalAmount: 0 } }));
+    await assertFails(getDocs(collection(client, 'tenants/other/fuelTransactions')));
+  }
+  await assertFails(getDoc(doc(env.authenticatedContext('driver').firestore(), 'tenants/fleet/fuelTransactions', requestId)));
+  await db.doc('tenants/fleet/users/accountant').update({ active: false });
+  await assertFails(getDocs(collection(env.authenticatedContext('accountant').firestore(), 'tenants/fleet/fuelTransactions')));
+  await db.doc('tenants/fleet').update({ active: false });
+  await assertFails(getDoc(doc(env.authenticatedContext('manager').firestore(), 'tenants/fleet/fuelTransactions', requestId)));
 });
